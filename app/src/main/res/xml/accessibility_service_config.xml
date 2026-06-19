@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Phase 1 config. Intentionally broad so we can DISCOVER what Truecaller exposes:
+  we listen to window state + content changes and can read window content. The
+  Kotlin service filters to the Truecaller package and only logs (stores nothing).
+  Once we know the exact package + view ids, we can tighten android:packageNames.
+-->
+<accessibility-service xmlns:android="http://schemas.android.com/apk/res/android"
+    android:accessibilityEventTypes="typeWindowStateChanged|typeWindowContentChanged"
+    android:accessibilityFeedbackType="feedbackGeneric"
+    android:accessibilityFlags="flagReportViewIds|flagRetrieveInteractiveWindows"
+    android:canRetrieveWindowContent="true"
+    android:notificationTimeout="100"
+    android:description="@string/accessibility_service_description" />
