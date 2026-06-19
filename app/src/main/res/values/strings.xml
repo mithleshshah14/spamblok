@@ -2,6 +2,10 @@
     <string name="app_name">SpamBlok (Phase 1)</string>
     <string name="accessibility_service_label">SpamBlok Banner Reader</string>
     <string name="open_accessibility_settings">Open Accessibility Settings</string>
+    <string name="refresh_log">Refresh log</string>
+    <string name="clear_log">Clear log</string>
+    <string name="captured_log_title">Captured caller log (on-device)</string>
+    <string name="log_empty">(No calls captured yet. Enable the service above, then receive a call and tap \"Refresh log\".)</string>
     <string name="accessibility_service_description">Reads the caller name shown by Truecaller during an incoming call, for SpamBlok\'s own caller-ID database. This build only logs locally — it stores and sends nothing.</string>
     <string name="phase1_instructions">Phase 1 — Banner reader test\n\nGoal: confirm we can read the caller name off Truecaller\'s incoming (ringing) screen as text.\n\nSteps:\n1. Tap the button below and enable \"SpamBlok Banner Reader\".\n2. Make sure Truecaller is installed and its caller ID is ON.\n3. Call this phone from another number and let it ring.\n4. On a computer, run:\n      adb logcat -s SpamBlokA11y\n   and watch for the caller name to appear.\n\nThis build only logs locally. It does not store or send anything.</string>
 </resources>
