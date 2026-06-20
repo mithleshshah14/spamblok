@@ -24,8 +24,26 @@ the real device.
 - ❌ (name is an image / secure window / unreadable) = stop and rethink; fall back
   to relying only on our own DB (see README deferred risks).
 
-**Explicitly NOT in this phase:** no own DB, no CallScreeningService, no UI, no
-reconciliation. Just read + log.
+**RESULT — ✅ PROVEN (2026-06-20).** On a Galaxy S25 (SM-S938B), the caller
+name/label is fully readable as plain text **during the ring, before answering**.
+Definitive capture at 10:58:47 while `call_state: "Incoming call"` with Answer/
+Decline controls present:
+`id/name: "Potential Fraud"`, `id/location_info: "Reported as Fraud"`,
+`id/phone_number: "+917669456375"`.
+Key learnings:
+- On this device the ring-time caller ID comes from **Samsung Smart Call (Hiya)**
+  via `com.samsung.android.incallui` (`id/name`, `id/phone_number`, `id/call_state`,
+  `id/location_info`). Truecaller showed its panel mostly *after* the call.
+- Spam labels read fine too ("Potential Fraud"). Names like "Zomato Delivery
+  Partner", "eKart Delivery" all came through.
+- Real validation of the layered strategy: the fraud number is a normal 10-digit
+  mobile (heuristics rate it NEUTRAL) — only the read-the-banner layer caught it.
+- Noise to fix in Phase 2: the `com.samsung.android.dialer` call-log screen
+  produced ~1,400 lines of irrelevant capture. Narrow the filter to `incallui` +
+  `truecaller`, ideally only when `call_state` is incoming/active.
+
+**Explicitly NOT in this phase:** no own DB, no CallScreeningService, no
+reconciliation. Just read + log (+ a basic on-device viewer added for convenience).
 
 ---
 
@@ -67,3 +85,7 @@ reconciliation. Just read + log.
 ## Current status
 
 - **2026-06-19:** roadmap written. Starting **Phase 1**.
+- **2026-06-20:** **Phase 1 ✅ COMPLETE & PROVEN** on a real Galaxy S25 — caller
+  name + spam label are readable pre-answer (see Phase 1 RESULT). Heuristics engine
+  + data-sources analysis also done. Next: **Phase 2** (CallScreeningService +
+  our own banner), starting with narrowing the capture filter.
