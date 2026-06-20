@@ -1,0 +1,38 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Foreground: a white phone handset, framed by a red prohibition ring + diagonal
+  slash = "blocked call". Drawn on the 108x108 adaptive-icon canvas; the phone is
+  scaled/centered into the safe zone, the ring + slash sit over it.
+-->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+
+    <!-- White phone handset (Material "phone"), scaled ~1.7x and centered. -->
+    <group
+        android:scaleX="1.7"
+        android:scaleY="1.7"
+        android:translateX="33.6"
+        android:translateY="33.6">
+        <path
+            android:fillColor="#FFFFFF"
+            android:pathData="M6.62,10.79c1.44,2.83 3.76,5.14 6.59,6.59l2.2,-2.2c0.27,-0.27 0.67,-0.36 1.02,-0.24 1.12,0.37 2.33,0.57 3.57,0.57 0.55,0 1,0.45 1,1L21,20c0,0.55 -0.45,1 -1,1 -9.39,0 -17,-7.61 -17,-17 0,-0.55 0.45,-1 1,-1h3.5c0.55,0 1,0.45 1,1 0,1.25 0.2,2.45 0.57,3.57 0.11,0.35 0.03,0.74 -0.24,1.02l-2.2,2.2z" />
+    </group>
+
+    <!-- Red prohibition ring. -->
+    <path
+        android:fillColor="#00000000"
+        android:strokeColor="#E53935"
+        android:strokeWidth="7"
+        android:pathData="M20,54 a34,34 0 1,0 68,0 a34,34 0 1,0 -68,0" />
+
+    <!-- Diagonal slash across the ring. -->
+    <path
+        android:fillColor="#00000000"
+        android:strokeColor="#E53935"
+        android:strokeWidth="7"
+        android:strokeLineCap="round"
+        android:pathData="M30,78 L78,30" />
+</vector>
