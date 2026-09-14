@@ -9,10 +9,12 @@ import android.util.Log
  * incoming NUMBER the moment a call rings, straight from Telecom (no accessibility
  * tricks needed for this part).
  *
- * We do NOT block or silence anything here yet (that's a later phase, once we trust
- * our own verdicts). This just records the number + a quick offline heuristic verdict
- * and shows our own overlay banner; [BannerReaderService] fills in the caller
- * NAME a little later, once Truecaller's/the in-call UI's overlay actually renders.
+ * A number matching a user-defined prefix in [BlockedPrefixStore] is rejected
+ * outright and silently (no ring, no notification, no overlay). Everything else is
+ * always allowed through — SpamBlok doesn't act on its own heuristic/Truecaller
+ * verdicts yet, it just records the number + a quick offline heuristic verdict and
+ * shows our own overlay banner; [BannerReaderService] fills in the caller NAME a
+ * little later, once Truecaller's/the in-call UI's overlay actually renders.
  */
 class SpamBlokCallScreeningService : CallScreeningService() {
 
@@ -23,13 +25,32 @@ class SpamBlokCallScreeningService : CallScreeningService() {
     override fun onScreenCall(callDetails: Call.Details) {
         val number = callDetails.handle?.schemeSpecificPart
 
-        // Always allow the call through — Phase 2 is "show info", not "block".
-        respondToCall(callDetails, CallResponse.Builder().build())
-
         if (number.isNullOrBlank()) {
+            respondToCall(callDetails, CallResponse.Builder().build())
             Log.d(TAG, "onScreenCall: no number available")
             return
         }
+
+        val matchedPrefix = BlockedPrefixStore.matches(this, number)
+        if (matchedPrefix != null) {
+            Log.d(TAG, "onScreenCall: $number BLOCKED (matched prefix '$matchedPrefix')")
+            respondToCall(
+                callDetails,
+                CallResponse.Builder()
+                    .setDisallowCall(true)
+                    .setRejectCall(true)
+                    .setSkipNotification(true)
+                    .build(),
+            )
+            CallLogStore.append(
+                this,
+                "── ${CallLogStore.timestamp()}  BLOCKED  $number (matched prefix '$matchedPrefix')\n\n",
+            )
+            return
+        }
+
+        // Not blocked — Phase 2 is "show info" for everything else, not "block".
+        respondToCall(callDetails, CallResponse.Builder().build())
 
         val verdict = NumberHeuristics.classify(number)
         Log.d(TAG, "onScreenCall: $number -> ${verdict.verdict} (${verdict.label})")

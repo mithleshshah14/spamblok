@@ -111,3 +111,12 @@ reconciliation. Just read + log (+ a basic on-device viewer added for convenienc
   - Builds and unit tests pass; **not yet verified on a real device** — same
     process as Phase 1: enable all three permissions, place a real incoming
     call, confirm the banner appears and updates with the name.
+  - Added user-managed **prefix blocklist** (e.g. "+9180" or "80"): matching
+    numbers are rejected outright by `SpamBlokCallScreeningService`
+    (silent — no ring, no notification), before any heuristic/overlay logic
+    runs. `PrefixMatcher` (pure, unit-tested) normalizes both the stored
+    prefix and the incoming number across with/without-country-code and
+    with/without-trunk-zero forms so "+9180", "9180", and "80" all match the
+    same numbers; `BlockedPrefixStore` persists prefixes in SharedPreferences.
+    Managed from `MainActivity` (add/remove rows); blocked calls are also
+    noted in the on-device caller log.
