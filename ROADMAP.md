@@ -207,3 +207,32 @@ reconciliation. Just read + log (+ a basic on-device viewer added for convenienc
   - **Not yet verified on a real device:** need to actually import a real list
     file and confirm a matching test call shows "Known spam (imported list)"
     on the overlay.
+- **2026-09-15: Phase 2's overlay banner ✅ finally VERIFIED working on a real
+  incoming call** — the actual bug, found by careful reading of a device
+  logcat (not by any of the platform/OEM theories chased beforehand): a
+  **race condition** in `OverlayService`. `showInternal()` (already running on
+  the main thread, since `show()` posts it there) called `dismiss()` to clear
+  any previous banner — but `dismiss()` itself *posted* its cleanup to the
+  main-thread queue instead of running it immediately. That queued cleanup
+  then executed *after* `showInternal()` had gone on to create and add the
+  new window, so it tore down the brand-new view instead of a stale one —
+  every single time, hence the window reliably coming back `attached=false`
+  a few milliseconds after a successful `addView()`. Fixed by splitting
+  `dismiss()` into a public, thread-hopping version and a private
+  `clearCurrent()` that `showInternal()` calls directly (synchronously, since
+  it's already on the main thread) instead of going through `dismiss()`.
+  - Along the way, several *wrong* theories were chased and ruled out before
+    finding this: Samsung/OneUI blocking third-party overlays during a call
+    (disproven — Truecaller does show a live card here when it holds the
+    call-screening role); the process not being "foreground" enough when
+    `CallScreeningService.onScreenCall()` adds the window (disproven — a
+    dedicated `OverlayForegroundService` didn't change anything, because that
+    was never the actual bug). Lesson: read the device log's own timestamps
+    and call stacks before generalizing to a platform limitation.
+  - Also added a tap-to-dismiss "✕" on the banner — without the race, the
+    only way to dismiss it early had been the 45s auto-timeout, and the user
+    got stuck looking at one on-device before this was added.
+  - `OverlayForegroundService` (owns the overlay window as a real foreground
+    component, not directly from the `CallScreeningService` callback) is kept
+    even though it turned out not to be the fix — it's a reasonable thing to
+    have regardless.

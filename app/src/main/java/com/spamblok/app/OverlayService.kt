@@ -48,27 +48,49 @@ object OverlayService {
     }
 
     private fun showInternal(context: Context, number: String, verdict: NumberHeuristics.Result) {
-        dismiss()
+        // Clear synchronously (not via dismiss(), which posts to mainHandler) — we're
+        // already on the main thread here (show() posted us there), so posting would
+        // queue the cleanup *behind* the addView() below, and it would then tear down
+        // the view we're about to create instead of the one before it. That was the
+        // actual bug behind every "attached=false" observed while debugging this.
+        clearCurrent()
 
         val density = context.resources.displayMetrics.density
         fun dp(v: Int) = (v * density).toInt()
 
         val container = LinearLayout(context).apply {
             orientation = LinearLayout.VERTICAL
-            setPadding(dp(16), dp(12), dp(16), dp(12))
-            setBackgroundColor(Color.parseColor("#DD222222"))
+            setPadding(dp(20), dp(16), dp(20), dp(16))
+            setBackgroundColor(Color.parseColor("#FF1A1A2E")) // fully opaque, unmissable
+            minimumHeight = dp(90)
         }
 
+        val titleRow = LinearLayout(context).apply {
+            orientation = LinearLayout.HORIZONTAL
+        }
         val numberView = TextView(context).apply {
             text = number
             setTextColor(Color.WHITE)
-            textSize = 16f
+            textSize = 20f
             typeface = Typeface.DEFAULT_BOLD
         }
+        val closeView = TextView(context).apply {
+            text = "✕"
+            setTextColor(Color.WHITE)
+            textSize = 20f
+            setPadding(dp(16), 0, dp(4), 0)
+            setOnClickListener { dismiss() }
+        }
+        titleRow.addView(
+            numberView,
+            LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f),
+        )
+        titleRow.addView(closeView)
+
         val nameView = TextView(context).apply {
             text = "Looking up name…"
-            setTextColor(Color.LTGRAY)
-            textSize = 14f
+            setTextColor(Color.WHITE)
+            textSize = 16f
         }
         val verdictColor = when (verdict.verdict) {
             NumberHeuristics.Verdict.LIKELY_SPAM -> Color.parseColor("#FF5252")
@@ -82,7 +104,7 @@ object OverlayService {
             textSize = 13f
         }
 
-        container.addView(numberView)
+        container.addView(titleRow)
         container.addView(nameView)
         container.addView(verdictView)
 
@@ -101,8 +123,10 @@ object OverlayService {
                 WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN,
             android.graphics.PixelFormat.TRANSLUCENT,
         ).apply {
-            gravity = Gravity.TOP
-            y = dp(48)
+            // Positioned mid-screen (like Truecaller's own card on this device) rather
+            // than pinned to the very top, which on a full-screen call UI can land
+            // inside a status-bar/cutout inset region and get clipped invisible.
+            gravity = Gravity.CENTER_VERTICAL
         }
 
         val wm = context.getSystemService(Context.WINDOW_SERVICE) as WindowManager
@@ -143,25 +167,33 @@ object OverlayService {
         }
     }
 
+    /** Callable from any thread; hops to the main thread if needed. */
     fun dismiss() {
-        mainHandler.post {
-            dismissRunnable?.let { mainHandler.removeCallbacks(it) }
-            dismissRunnable = null
-            CallerInfoStore.setListener(null)
-            val wm = windowManager
-            val v = view
-            if (wm != null && v != null) {
-                try {
-                    wm.removeView(v)
-                } catch (e: Exception) {
-                    Log.w(TAG, "removeView failed (already removed?)", e)
-                }
-            }
-            windowManager = null
-            view = null
-            numberText = null
-            nameText = null
-            verdictText = null
+        if (Looper.myLooper() == Looper.getMainLooper()) {
+            clearCurrent()
+        } else {
+            mainHandler.post { clearCurrent() }
         }
+    }
+
+    /** Must only be called on the main thread. */
+    private fun clearCurrent() {
+        dismissRunnable?.let { mainHandler.removeCallbacks(it) }
+        dismissRunnable = null
+        CallerInfoStore.setListener(null)
+        val wm = windowManager
+        val v = view
+        if (wm != null && v != null) {
+            try {
+                wm.removeView(v)
+            } catch (e: Exception) {
+                Log.w(TAG, "removeView failed (already removed?)", e)
+            }
+        }
+        windowManager = null
+        view = null
+        numberText = null
+        nameText = null
+        verdictText = null
     }
 }

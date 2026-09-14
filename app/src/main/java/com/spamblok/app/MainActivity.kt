@@ -111,6 +111,14 @@ class MainActivity : AppCompatActivity() {
             }
         }
 
+        val testOverlay = Button(this).apply {
+            text = "Debug: show test overlay now"
+            setOnClickListener {
+                OverlayService.show(this@MainActivity, "+911234567890", NumberHeuristics.classify("+911234567890"))
+                Toast.makeText(this@MainActivity, "Triggered overlay", Toast.LENGTH_SHORT).show()
+            }
+        }
+
         val requestPhoneState = Button(this).apply {
             text = getString(R.string.grant_phone_state_permission)
             setOnClickListener {
@@ -250,6 +258,7 @@ class MainActivity : AppCompatActivity() {
         content.addView(info)
         content.addView(openAccessibility, LinearLayout.LayoutParams(mp, wc).apply { topMargin = pad })
         content.addView(openOverlay, LinearLayout.LayoutParams(mp, wc))
+        content.addView(testOverlay, LinearLayout.LayoutParams(mp, wc))
         content.addView(requestPhoneState, LinearLayout.LayoutParams(mp, wc))
         content.addView(requestScreeningRole, LinearLayout.LayoutParams(mp, wc))
         content.addView(blocklistTitle)

@@ -82,6 +82,8 @@ class SpamBlokCallScreeningService : CallScreeningService() {
             CallerInfoStore.onDbLookup(known.name, known.label)
         }
 
-        OverlayService.show(this, number, verdict)
+        // Started as a real foreground service (own notification), not called
+        // directly here — see OverlayForegroundService's doc comment for why.
+        OverlayForegroundService.start(this, number, verdict)
     }
 }
