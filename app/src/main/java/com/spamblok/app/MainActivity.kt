@@ -33,6 +33,27 @@ class MainActivity : AppCompatActivity() {
     private lateinit var blocklistContainer: LinearLayout
     private lateinit var prefixInput: EditText
     private lateinit var knownCallersView: TextView
+    private lateinit var spamListStatusView: TextView
+
+    // Phase 4: user picks a plain-text spam-number list file they downloaded
+    // themselves (see DATA_SOURCES.md) — we don't bundle/redistribute anyone
+    // else's database, just import what the user hands us, on-device.
+    private val importSpamListLauncher = registerForActivityResult(ActivityResultContracts.GetContent()) { uri ->
+        if (uri == null) return@registerForActivityResult
+        val lines = try {
+            contentResolver.openInputStream(uri)?.bufferedReader()?.readLines()
+        } catch (e: Exception) {
+            null
+        }
+        if (lines == null) {
+            Toast.makeText(this, "Couldn't read that file", Toast.LENGTH_SHORT).show()
+            return@registerForActivityResult
+        }
+        val numbers = SpamNumberListStore.parseLines(lines)
+        val imported = SpamNumberListStore.importNumbers(this, numbers)
+        Toast.makeText(this, "Imported $imported number(s)", Toast.LENGTH_SHORT).show()
+        reloadSpamListStatus()
+    }
 
     // RoleManager's request-role intent must be launched for a RESULT (not a plain
     // startActivity) — RequestRoleActivity reads the *calling* package via
@@ -146,6 +167,37 @@ class MainActivity : AppCompatActivity() {
             orientation = LinearLayout.VERTICAL
         }
 
+        val spamListTitle = TextView(this).apply {
+            text = getString(R.string.spam_list_title)
+            textSize = 16f
+            setTypeface(typeface, Typeface.BOLD)
+            setPadding(0, pad, 0, pad / 4)
+        }
+
+        val spamListHint = TextView(this).apply {
+            text = getString(R.string.spam_list_hint)
+            textSize = 13f
+        }
+
+        spamListStatusView = TextView(this).apply {
+            textSize = 13f
+            setPadding(0, pad / 2, 0, pad / 2)
+        }
+
+        val importSpamList = Button(this).apply {
+            text = getString(R.string.spam_list_import)
+            setOnClickListener { importSpamListLauncher.launch("*/*") }
+        }
+
+        val clearSpamList = Button(this).apply {
+            text = getString(R.string.spam_list_clear)
+            setOnClickListener {
+                SpamNumberListStore.clear(this@MainActivity)
+                reloadSpamListStatus()
+                Toast.makeText(this@MainActivity, "Imported list cleared", Toast.LENGTH_SHORT).show()
+            }
+        }
+
         val knownCallersTitle = TextView(this).apply {
             text = getString(R.string.known_callers_title)
             textSize = 16f
@@ -205,6 +257,11 @@ class MainActivity : AppCompatActivity() {
         content.addView(prefixInput, LinearLayout.LayoutParams(mp, wc).apply { topMargin = pad / 2 })
         content.addView(addPrefix, LinearLayout.LayoutParams(mp, wc))
         content.addView(blocklistContainer, LinearLayout.LayoutParams(mp, wc))
+        content.addView(spamListTitle)
+        content.addView(spamListHint)
+        content.addView(spamListStatusView)
+        content.addView(importSpamList, LinearLayout.LayoutParams(mp, wc))
+        content.addView(clearSpamList, LinearLayout.LayoutParams(mp, wc))
         content.addView(knownCallersTitle)
         content.addView(knownCallersHint)
         content.addView(knownCallersView)
@@ -221,6 +278,7 @@ class MainActivity : AppCompatActivity() {
         reloadLog()
         reloadBlocklist()
         reloadKnownCallers()
+        reloadSpamListStatus()
     }
 
     private fun requestCallScreeningRole() {
@@ -243,6 +301,15 @@ class MainActivity : AppCompatActivity() {
     private fun reloadLog() {
         val text = CallLogStore.read(this)
         logView.text = if (text.isBlank()) getString(R.string.log_empty) else text
+    }
+
+    private fun reloadSpamListStatus() {
+        val count = SpamNumberListStore.count(this)
+        spamListStatusView.text = if (count == 0) {
+            getString(R.string.spam_list_empty)
+        } else {
+            getString(R.string.spam_list_count, count)
+        }
     }
 
     private fun reloadKnownCallers() {

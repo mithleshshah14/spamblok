@@ -184,3 +184,26 @@ reconciliation. Just read + log (+ a basic on-device viewer added for convenienc
   - **Not yet verified on a real device:** need two calls from the same
     (unsaved) test number — first to populate the DB via the banner, second to
     confirm the overlay shows the name instantly from the DB this time.
+- **2026-09-14: Phase 4 implemented (real data sources), needs real-device verification.**
+  - Pattern/heuristic flagging (`NumberHeuristics`, 140/160 series) was already
+    done in Phase 1 — per `DATA_SOURCES.md`'s own recommendation, that's Option 1.
+  - The remaining piece, bundling an open spam-number list (Option 2, e.g. Yet
+    Another Call Blocker's crowdsourced DB): SpamBlok does **not** bundle or
+    redistribute someone else's database itself (that project's own
+    license/ToS governs redistribution, and we have no vetted snapshot to ship
+    reliably). Instead, `SpamNumberListStore` is an **import** mechanism — the
+    user downloads a plain-text number list themselves and imports it via a
+    file picker in `MainActivity`, entirely on-device (same privacy guarantee
+    as everything else). `parseLines()` (strip comments/blanks, digits-only,
+    discard non-number junk) is pure and unit-tested.
+  - `SpamBlokCallScreeningService` checks the imported list right after the
+    heuristic classification: a match upgrades the verdict to `LIKELY_SPAM`
+    with label "Known spam (imported list)" — shown on the overlay the same
+    way a `140` prefix is. It does **not** block the call outright; only the
+    user's own `BlockedPrefixStore` (Phase 2) does that.
+  - TRAI DND/DLT and Chakshu/Sanchar Saathi remain **not usable as a feed**
+    (no public API/downloadable dataset, per `DATA_SOURCES.md`) — nothing to
+    integrate there yet; revisit if a public API ever appears.
+  - **Not yet verified on a real device:** need to actually import a real list
+    file and confirm a matching test call shows "Known spam (imported list)"
+    on the overlay.

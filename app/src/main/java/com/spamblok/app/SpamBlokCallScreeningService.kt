@@ -20,6 +20,12 @@ import android.util.Log
  * name/label immediately, with no "Looking up name…" wait; either way,
  * [BannerReaderService] still reads the live banner a little later, which fills
  * the DB in for next time and overrides a DB guess if it ever disagrees.
+ *
+ * Phase 4 — a number found in the user-imported [SpamNumberListStore] (an
+ * offline spam-number list the user downloaded and imported themselves — see
+ * DATA_SOURCES.md) upgrades the heuristic verdict shown on the overlay, the
+ * same way a `140` telemarketer prefix does. It doesn't block the call outright;
+ * only the user's own [BlockedPrefixStore] does that.
  */
 class SpamBlokCallScreeningService : CallScreeningService() {
 
@@ -57,7 +63,15 @@ class SpamBlokCallScreeningService : CallScreeningService() {
         // Not blocked — Phase 2 is "show info" for everything else, not "block".
         respondToCall(callDetails, CallResponse.Builder().build())
 
-        val verdict = NumberHeuristics.classify(number)
+        var verdict = NumberHeuristics.classify(number)
+        if (SpamNumberListStore.contains(this, number)) {
+            verdict = verdict.copy(
+                verdict = NumberHeuristics.Verdict.LIKELY_SPAM,
+                label = "Known spam (imported list)",
+                reason = "Matches a number in the imported spam-number list.",
+                confidence = 95,
+            )
+        }
         Log.d(TAG, "onScreenCall: $number -> ${verdict.verdict} (${verdict.label})")
 
         CallerInfoStore.onNumberScreened(number)

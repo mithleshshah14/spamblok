@@ -14,6 +14,12 @@
     <string name="blocklist_remove">Remove</string>
     <string name="blocklist_empty">(No blocked prefixes yet.)</string>
     <string name="blocklist_invalid_prefix">Enter at least 2 digits</string>
+    <string name="spam_list_title">Imported spam-number list</string>
+    <string name="spam_list_hint">Import a plain-text list of known spam numbers you\'ve downloaded yourself (one number per line, "#" for comments — e.g. a Yet Another Call Blocker export). A match upgrades the on-call verdict shown on SpamBlok\'s banner; it does not block the call. Nothing is uploaded, and SpamBlok does not bundle or redistribute anyone else\'s list.</string>
+    <string name="spam_list_import">Import list file</string>
+    <string name="spam_list_clear">Clear imported list</string>
+    <string name="spam_list_empty">(No spam-number list imported yet.)</string>
+    <string name="spam_list_count">%d number(s) imported.</string>
     <string name="known_callers_title">Known callers (our own DB)</string>
     <string name="known_callers_hint">Every number/name SpamBlok has read off a banner, stored locally. Looked up first on the next call from that number.</string>
     <string name="known_callers_empty">(Nothing learned yet — receive a call with the banner reader active.)</string>
