@@ -249,3 +249,60 @@ reconciliation. Just read + log (+ a basic on-device viewer added for convenienc
   windows stay behind the lock screen by default (the system InCallUI draws
   on top of it) — needs `FLAG_SHOW_WHEN_LOCKED` explicitly. Both the new card
   design and lock-screen visibility are now confirmed working on a real call.
+- **2026-09-15: App restructured from a settings-style single screen into a
+  real caller app.** Raw activity-log viewer removed from the main screen
+  (backend `CallLogStore` logging kept, just not displayed). All
+  SpamBlok-specific protection features (setup status, blocklist, imported
+  spam list, known callers, debug test-overlay button) moved out of
+  `MainActivity` into a new `SettingsActivity`, reached via a gear icon —
+  modeled after a Truecaller reference screenshot the user shared, where the
+  primary screen is just calls/search/dialer and protection settings live
+  behind a gear icon. `MainActivity` is now a 2-tab (Calls / Messages) app:
+  - **Calls tab**: search bar + "Dial" button, a horizontal "recents" avatar
+    strip, and the call list (`CallLogRepository`, reads `CallLog.Calls`).
+    Tapping a row opens an action sheet (Call / Add name / Edit name).
+  - **Messages tab**: message list (`SmsRepository`, reads `Telephony.Sms`).
+  - New shared `UiKit.kt` for programmatic View-building helpers (cards,
+    avatars, pills, buttons) used by both `MainActivity` and
+    `SettingsActivity`.
+  - Fixed a crash on both tabs: `CallLogRepository`/`SmsRepository` originally
+    passed `"$COLUMN DESC LIMIT $limit"` as the ContentResolver `sortOrder`,
+    which this device's provider rejects (`IllegalArgumentException: Invalid
+    token LIMIT`). Fixed by sorting only in `sortOrder` and capping via
+    `out.size < limit` while iterating.
+  - Added the ability to add/edit a name for a number directly from the Calls
+    tab (`CallerRepository.setManualName()`), since system Contacts isn't
+    always populated for every caller.
+- **2026-09-15: [UNRESOLVED — carrying into next session] Caller-name
+  priority still wrong: a number saved to system Contacts after a call still
+  shows our own DB's name instead of the live Contacts name.** Root cause
+  identified: `CallLog.Calls.CACHED_NAME` (what call-log rows carry) is a
+  snapshot taken at call time, so it doesn't reflect a contact added
+  afterward. First attempted fix (this session): added `ContactsRepository.kt`
+  (live `ContactsContract.PhoneLookup.CONTENT_FILTER_URI` query), added
+  `READ_CONTACTS` permission, changed the Calls-tab permission request to ask
+  for `READ_CALL_LOG` + `READ_CONTACTS` together, and reordered
+  `MainActivity.resolveCaller()` to prefer a live Contacts lookup over the
+  cached call-log name before falling back to our own DB. Built, installed,
+  user re-tested — **still shows the DB name, not the Contacts name.** Not
+  yet debugged further (session ended here). Suspects to check next session,
+  in order:
+  1. Whether `READ_CONTACTS` was actually granted on-device — the "Grant
+     access" button now requests both permissions together, but if the user
+     had already dismissed/denied it before this change landed, the app may
+     still be running without it (`hasPermission()` gate in `resolveCaller()`
+     would silently skip the live lookup and fall through to the DB name).
+     Check via `adb shell dumpsys package com.spamblok.app | grep -A2
+     READ_CONTACTS`.
+  2. Whether `ContactsRepository.lookupName()` is actually being reached —
+     add a temporary log line, or check that `resolveCaller()`'s call site in
+     the row-rendering code passes the right raw number format (E.164 vs.
+     local) — `PhoneLookup.CONTENT_FILTER_URI` can be sensitive to number
+     formatting/normalization mismatches on some OEMs.
+  3. Whether the emulator/device's Contacts entry was actually saved for the
+     *same* number string being looked up (e.g. saved with a different
+     country-code prefix than what the call log recorded).
+  4. Double check `resolveCaller()`'s priority chain is actually being hit
+     for the row in question — confirm the render path calls the updated
+     `resolveCaller()` and not some other stale name-resolution code path
+     left over from before this session's refactor.

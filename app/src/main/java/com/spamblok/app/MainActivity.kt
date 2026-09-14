@@ -1,18 +1,21 @@
 package com.spamblok.app
 
 import android.Manifest
-import android.app.role.RoleManager
+import android.app.AlertDialog
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.graphics.Color
 import android.graphics.Typeface
 import android.net.Uri
-import android.os.Build
 import android.os.Bundle
-import android.provider.Settings
+import android.text.Editable
+import android.text.TextWatcher
+import android.view.Gravity
+import android.view.View
 import android.view.ViewGroup
-import android.widget.Button
 import android.widget.EditText
+import android.widget.FrameLayout
+import android.widget.HorizontalScrollView
 import android.widget.LinearLayout
 import android.widget.ScrollView
 import android.widget.TextView
@@ -20,362 +23,447 @@ import android.widget.Toast
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.content.ContextCompat
+import com.google.android.material.bottomnavigation.BottomNavigationView
 
 /**
- * Phase 2 UI: sets up all three pieces SpamBlok needs — the accessibility banner
- * reader (Phase 1), the overlay-draw permission, and the system call-screening
- * role — lets the user manage the prefix blocklist, and shows the on-device
- * captured caller log (refresh / clear).
+ * SpamBlok's main screen: a Calls tab styled like a normal caller-ID app
+ * (search, recent contacts, call history, dial) and a Messages tab
+ * (read-only SMS). Protection settings (setup status, blocklist, imported
+ * spam list, known-callers DB) live behind the gear icon — see
+ * [SettingsActivity] — so this screen reads as an app, not a settings list.
  */
 class MainActivity : AppCompatActivity() {
 
-    private lateinit var logView: TextView
-    private lateinit var blocklistContainer: LinearLayout
-    private lateinit var prefixInput: EditText
-    private lateinit var knownCallersView: TextView
-    private lateinit var spamListStatusView: TextView
+    private lateinit var callsPage: View
+    private lateinit var messagesPage: View
+    private lateinit var callsPermissionCard: View
+    private lateinit var recentsRow: LinearLayout
+    private lateinit var callsListContainer: LinearLayout
+    private lateinit var messagesPermissionCard: View
+    private lateinit var messagesListContainer: LinearLayout
 
-    // Phase 4: user picks a plain-text spam-number list file they downloaded
-    // themselves (see DATA_SOURCES.md) — we don't bundle/redistribute anyone
-    // else's database, just import what the user hands us, on-device.
-    private val importSpamListLauncher = registerForActivityResult(ActivityResultContracts.GetContent()) { uri ->
-        if (uri == null) return@registerForActivityResult
-        val lines = try {
-            contentResolver.openInputStream(uri)?.bufferedReader()?.readLines()
-        } catch (e: Exception) {
-            null
-        }
-        if (lines == null) {
-            Toast.makeText(this, "Couldn't read that file", Toast.LENGTH_SHORT).show()
-            return@registerForActivityResult
-        }
-        val numbers = SpamNumberListStore.parseLines(lines)
-        val imported = SpamNumberListStore.importNumbers(this, numbers)
-        Toast.makeText(this, "Imported $imported number(s)", Toast.LENGTH_SHORT).show()
-        reloadSpamListStatus()
+    private var callLogEntries: List<CallLogRepository.Entry> = emptyList()
+    private var callSearchFilter: String = ""
+
+    // Bundled together: call history needs READ_CALL_LOG, and resolving names
+    // for it live (rather than the call log's own stale CACHED_NAME snapshot)
+    // needs READ_CONTACTS. Both are asked for from the same "Grant access" tap.
+    private val requestCallsPermissionsLauncher = registerForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { _ ->
+        if (hasPermission(Manifest.permission.READ_CALL_LOG)) reloadCallLog()
+        updateCallsPermissionCard()
     }
 
-    // RoleManager's request-role intent must be launched for a RESULT (not a plain
-    // startActivity) — RequestRoleActivity reads the *calling* package via
-    // getCallingPackage(), which is only populated for an activity-for-result launch.
-    // Launched with plain startActivity(), it silently no-ops ("Package name cannot
-    // be null or empty").
-    private val requestRoleLauncher = registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
-        val message = if (result.resultCode == RESULT_OK) {
-            "SpamBlok is now the call-screening app"
-        } else {
-            "Call-screening role request was cancelled"
-        }
-        Toast.makeText(this, message, Toast.LENGTH_SHORT).show()
+    private val requestSmsLauncher = registerForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
+        if (granted) reloadMessages()
+        updateMessagesPermissionCard()
     }
 
-    // READ_PHONE_STATE is a dangerous runtime permission. Declaring it in the
-    // manifest alone leaves it ungranted — and on this device at least, Telecom
-    // silently refuses to ever bind SpamBlokCallScreeningService while it's
-    // ungranted (no error, it just skips straight to the OEM's own screening).
-    private val requestPhoneStateLauncher = registerForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
-        val message = if (granted) "Phone-state permission granted" else "Phone-state permission denied"
-        Toast.makeText(this, message, Toast.LENGTH_SHORT).show()
-    }
+    private fun dp(v: Int) = UiKit.dp(this, v)
+    private fun hasPermission(permission: String) =
+        ContextCompat.checkSelfPermission(this, permission) == PackageManager.PERMISSION_GRANTED
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
-        val pad = (16 * resources.displayMetrics.density).toInt()
-        val mp = ViewGroup.LayoutParams.MATCH_PARENT
-        val wc = ViewGroup.LayoutParams.WRAP_CONTENT
+        val root = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
 
-        val content = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-            setPadding(pad, pad, pad, pad)
+        val header = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            setBackgroundColor(Color.parseColor("#0066FF"))
+            setPadding(dp(20), dp(28), dp(20), dp(20))
         }
+        val titleColumn = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+        titleColumn.addView(
+            TextView(this).apply {
+                text = getString(R.string.app_display_name)
+                setTextColor(Color.WHITE)
+                textSize = 24f
+                typeface = Typeface.DEFAULT_BOLD
+            },
+        )
+        titleColumn.addView(
+            TextView(this).apply {
+                text = getString(R.string.app_tagline)
+                setTextColor(Color.parseColor("#CCFFFFFF"))
+                textSize = 13f
+                setPadding(0, dp(4), 0, 0)
+            },
+        )
+        header.addView(titleColumn, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
+        header.addView(
+            UiKit.textButton(this, "⚙") { startActivity(Intent(this, SettingsActivity::class.java)) }
+                .apply { setTextColor(Color.WHITE); textSize = 20f },
+        )
+        root.addView(header, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
 
-        val info = TextView(this).apply {
-            text = getString(R.string.phase2_instructions)
-            textSize = 14f
-        }
+        val pageContainer = FrameLayout(this)
+        callsPage = buildCallsPage()
+        messagesPage = buildMessagesPage()
+        pageContainer.addView(callsPage)
+        pageContainer.addView(messagesPage)
+        root.addView(pageContainer, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f))
 
-        val openAccessibility = Button(this).apply {
-            text = getString(R.string.open_accessibility_settings)
-            setOnClickListener { startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS)) }
-        }
-
-        val openOverlay = Button(this).apply {
-            text = getString(R.string.grant_overlay_permission)
-            setOnClickListener {
-                val intent = Intent(
-                    Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
-                    Uri.parse("package:$packageName"),
-                )
-                startActivity(intent)
+        val navCallsId = View.generateViewId()
+        val navMessagesId = View.generateViewId()
+        val bottomNav = BottomNavigationView(this).apply {
+            menu.add(0, navCallsId, 0, "Calls")
+            menu.add(0, navMessagesId, 1, "Messages")
+            selectedItemId = navCallsId
+            setOnItemSelectedListener { item ->
+                showPage(if (item.itemId == navMessagesId) messagesPage else callsPage)
+                true
             }
         }
+        root.addView(bottomNav, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
 
-        val testOverlay = Button(this).apply {
-            text = "Debug: show test overlay now"
-            setOnClickListener {
-                OverlayService.show(this@MainActivity, "+911234567890", NumberHeuristics.classify("+911234567890"))
-                Toast.makeText(this@MainActivity, "Triggered overlay", Toast.LENGTH_SHORT).show()
-            }
-        }
+        showPage(callsPage)
+        setContentView(root)
+    }
 
-        val requestPhoneState = Button(this).apply {
-            text = getString(R.string.grant_phone_state_permission)
-            setOnClickListener {
-                if (ContextCompat.checkSelfPermission(this@MainActivity, Manifest.permission.READ_PHONE_STATE)
-                    == PackageManager.PERMISSION_GRANTED
-                ) {
-                    Toast.makeText(this@MainActivity, "Already granted", Toast.LENGTH_SHORT).show()
-                } else {
-                    requestPhoneStateLauncher.launch(Manifest.permission.READ_PHONE_STATE)
-                }
-            }
-        }
-
-        val requestScreeningRole = Button(this).apply {
-            text = getString(R.string.set_as_call_screener)
-            setOnClickListener { requestCallScreeningRole() }
-        }
-
-        val blocklistTitle = TextView(this).apply {
-            text = getString(R.string.blocklist_title)
-            textSize = 16f
-            setTypeface(typeface, Typeface.BOLD)
-            setPadding(0, pad, 0, pad / 4)
-        }
-
-        val blocklistHint = TextView(this).apply {
-            text = getString(R.string.blocklist_hint)
-            textSize = 13f
-        }
-
-        prefixInput = EditText(this).apply {
-            hint = getString(R.string.blocklist_input_hint)
-            inputType = android.text.InputType.TYPE_CLASS_PHONE
-        }
-
-        val addPrefix = Button(this).apply {
-            text = getString(R.string.blocklist_add)
-            setOnClickListener {
-                val raw = prefixInput.text.toString()
-                if (BlockedPrefixStore.add(this@MainActivity, raw)) {
-                    prefixInput.text.clear()
-                    reloadBlocklist()
-                } else {
-                    Toast.makeText(
-                        this@MainActivity,
-                        getString(R.string.blocklist_invalid_prefix),
-                        Toast.LENGTH_SHORT,
-                    ).show()
-                }
-            }
-        }
-
-        blocklistContainer = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-        }
-
-        val spamListTitle = TextView(this).apply {
-            text = getString(R.string.spam_list_title)
-            textSize = 16f
-            setTypeface(typeface, Typeface.BOLD)
-            setPadding(0, pad, 0, pad / 4)
-        }
-
-        val spamListHint = TextView(this).apply {
-            text = getString(R.string.spam_list_hint)
-            textSize = 13f
-        }
-
-        spamListStatusView = TextView(this).apply {
-            textSize = 13f
-            setPadding(0, pad / 2, 0, pad / 2)
-        }
-
-        val importSpamList = Button(this).apply {
-            text = getString(R.string.spam_list_import)
-            setOnClickListener { importSpamListLauncher.launch("*/*") }
-        }
-
-        val clearSpamList = Button(this).apply {
-            text = getString(R.string.spam_list_clear)
-            setOnClickListener {
-                SpamNumberListStore.clear(this@MainActivity)
-                reloadSpamListStatus()
-                Toast.makeText(this@MainActivity, "Imported list cleared", Toast.LENGTH_SHORT).show()
-            }
-        }
-
-        val knownCallersTitle = TextView(this).apply {
-            text = getString(R.string.known_callers_title)
-            textSize = 16f
-            setTypeface(typeface, Typeface.BOLD)
-            setPadding(0, pad, 0, pad / 4)
-        }
-
-        val knownCallersHint = TextView(this).apply {
-            text = getString(R.string.known_callers_hint)
-            textSize = 13f
-        }
-
-        knownCallersView = TextView(this).apply {
-            textSize = 12f
-            setTextIsSelectable(true)
-            typeface = Typeface.MONOSPACE
-            setPadding(0, pad / 2, 0, 0)
-        }
-
-        val refresh = Button(this).apply {
-            text = getString(R.string.refresh_log)
-            setOnClickListener {
-                reloadLog()
-                reloadKnownCallers()
-            }
-        }
-
-        val clear = Button(this).apply {
-            text = getString(R.string.clear_log)
-            setOnClickListener {
-                CallLogStore.clear(this@MainActivity)
-                reloadLog()
-                Toast.makeText(this@MainActivity, "Log cleared", Toast.LENGTH_SHORT).show()
-            }
-        }
-
-        val logTitle = TextView(this).apply {
-            text = getString(R.string.captured_log_title)
-            textSize = 16f
-            setTypeface(typeface, Typeface.BOLD)
-            setPadding(0, pad, 0, pad / 2)
-        }
-
-        logView = TextView(this).apply {
-            textSize = 12f
-            setTextIsSelectable(true)
-            typeface = Typeface.MONOSPACE
-        }
-
-        content.addView(info)
-        content.addView(openAccessibility, LinearLayout.LayoutParams(mp, wc).apply { topMargin = pad })
-        content.addView(openOverlay, LinearLayout.LayoutParams(mp, wc))
-        content.addView(testOverlay, LinearLayout.LayoutParams(mp, wc))
-        content.addView(requestPhoneState, LinearLayout.LayoutParams(mp, wc))
-        content.addView(requestScreeningRole, LinearLayout.LayoutParams(mp, wc))
-        content.addView(blocklistTitle)
-        content.addView(blocklistHint)
-        content.addView(prefixInput, LinearLayout.LayoutParams(mp, wc).apply { topMargin = pad / 2 })
-        content.addView(addPrefix, LinearLayout.LayoutParams(mp, wc))
-        content.addView(blocklistContainer, LinearLayout.LayoutParams(mp, wc))
-        content.addView(spamListTitle)
-        content.addView(spamListHint)
-        content.addView(spamListStatusView)
-        content.addView(importSpamList, LinearLayout.LayoutParams(mp, wc))
-        content.addView(clearSpamList, LinearLayout.LayoutParams(mp, wc))
-        content.addView(knownCallersTitle)
-        content.addView(knownCallersHint)
-        content.addView(knownCallersView)
-        content.addView(refresh, LinearLayout.LayoutParams(mp, wc).apply { topMargin = pad })
-        content.addView(clear, LinearLayout.LayoutParams(mp, wc))
-        content.addView(logTitle)
-        content.addView(logView)
-
-        setContentView(ScrollView(this).apply { addView(content) })
+    private fun showPage(page: View) {
+        callsPage.visibility = if (page === callsPage) View.VISIBLE else View.GONE
+        messagesPage.visibility = if (page === messagesPage) View.VISIBLE else View.GONE
     }
 
     override fun onResume() {
         super.onResume()
-        reloadLog()
-        reloadBlocklist()
-        reloadKnownCallers()
-        reloadSpamListStatus()
+        if (hasPermission(Manifest.permission.READ_CALL_LOG)) reloadCallLog()
+        if (hasPermission(Manifest.permission.READ_SMS)) reloadMessages()
+        updateCallsPermissionCard()
+        updateMessagesPermissionCard()
     }
 
-    private fun requestCallScreeningRole() {
-        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) {
-            Toast.makeText(this, "Call screening role needs Android 10+", Toast.LENGTH_LONG).show()
-            return
-        }
-        val roleManager = getSystemService(RoleManager::class.java)
-        if (roleManager == null || !roleManager.isRoleAvailable(RoleManager.ROLE_CALL_SCREENING)) {
-            Toast.makeText(this, "Call screening role not available on this device", Toast.LENGTH_LONG).show()
-            return
-        }
-        if (roleManager.isRoleHeld(RoleManager.ROLE_CALL_SCREENING)) {
-            Toast.makeText(this, "SpamBlok is already the call-screening app", Toast.LENGTH_SHORT).show()
-            return
-        }
-        requestRoleLauncher.launch(roleManager.createRequestRoleIntent(RoleManager.ROLE_CALL_SCREENING))
-    }
+    // ---------------------------------------------------------------------
+    // Calls page — search bar, recent contacts strip, call history
+    // ---------------------------------------------------------------------
 
-    private fun reloadLog() {
-        val text = CallLogStore.read(this)
-        logView.text = if (text.isBlank()) getString(R.string.log_empty) else text
-    }
-
-    private fun reloadSpamListStatus() {
-        val count = SpamNumberListStore.count(this)
-        spamListStatusView.text = if (count == 0) {
-            getString(R.string.spam_list_empty)
-        } else {
-            getString(R.string.spam_list_count, count)
+    private fun buildCallsPage(): View {
+        val mp = ViewGroup.LayoutParams.MATCH_PARENT
+        val wc = ViewGroup.LayoutParams.WRAP_CONTENT
+        val body = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setBackgroundColor(Color.parseColor("#F5F7FA"))
         }
-    }
 
-    private fun reloadKnownCallers() {
-        val records = CallerRepository.getRecent(this)
-        knownCallersView.text = if (records.isEmpty()) {
-            getString(R.string.known_callers_empty)
-        } else {
-            val fmt = java.text.SimpleDateFormat("MM-dd HH:mm", java.util.Locale.US)
-            records.joinToString("\n\n") { r ->
-                val what = listOfNotNull(r.name, r.label).joinToString(" — ").ifBlank { "(no name/label)" }
-                val mismatch = if (r.mismatchCount > 0) " ⚠ ${r.mismatchCount} mismatch(es)" else ""
-                "${r.number}\n  $what$mismatch\n  source: ${r.source ?: "?"} · last seen ${fmt.format(java.util.Date(r.lastSeenMillis))}"
-            }
+        // Search bar + dial button.
+        val searchRow = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            setPadding(dp(16), dp(16), dp(16), dp(8))
         }
-    }
-
-    private fun reloadBlocklist() {
-        blocklistContainer.removeAllViews()
-        val prefixes = BlockedPrefixStore.getAll(this)
-        val pad = (8 * resources.displayMetrics.density).toInt()
-
-        if (prefixes.isEmpty()) {
-            blocklistContainer.addView(
-                TextView(this).apply {
-                    text = getString(R.string.blocklist_empty)
-                    textSize = 13f
-                    setTextColor(Color.GRAY)
-                    setPadding(0, pad, 0, pad)
+        val searchInput = EditText(this).apply {
+            hint = "Search numbers, names & more"
+            setPadding(dp(14), dp(10), dp(14), dp(10))
+            background = UiKit.fieldBackground(this@MainActivity)
+            textSize = 14f
+            addTextChangedListener(
+                object : TextWatcher {
+                    override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) {}
+                    override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) {}
+                    override fun afterTextChanged(s: Editable?) {
+                        callSearchFilter = s?.toString().orEmpty()
+                        renderCallLog()
+                    }
                 },
             )
-            return
         }
+        searchRow.addView(searchInput, LinearLayout.LayoutParams(0, wc, 1f))
+        searchRow.addView(
+            UiKit.secondaryButton(this, "Dial") { startActivity(Intent(Intent.ACTION_DIAL)) },
+            LinearLayout.LayoutParams(wc, wc).apply { marginStart = dp(8) },
+        )
+        body.addView(searchRow, LinearLayout.LayoutParams(mp, wc))
 
-        prefixes.forEach { prefix ->
-            val row = LinearLayout(this).apply {
-                orientation = LinearLayout.HORIZONTAL
-                setPadding(0, pad / 2, 0, pad / 2)
-            }
-            val label = TextView(this).apply {
-                text = prefix
-                textSize = 14f
-            }
-            val remove = Button(this).apply {
-                text = getString(R.string.blocklist_remove)
-                setOnClickListener {
-                    BlockedPrefixStore.remove(this@MainActivity, prefix)
-                    reloadBlocklist()
+        // Recent contacts strip.
+        recentsRow = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
+        val recentsScroll = HorizontalScrollView(this).apply {
+            isHorizontalScrollBarEnabled = false
+            setPadding(dp(16), 0, dp(16), dp(8))
+            addView(recentsRow)
+        }
+        body.addView(recentsScroll, LinearLayout.LayoutParams(mp, wc))
+
+        val listSection = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(16), 0, dp(16), dp(16))
+        }
+        callsPermissionCard = UiKit.card(this, listSection).let { content ->
+            content.addView(
+                TextView(this).apply {
+                    text = "SpamBlok needs access to your call log to show call history here. Nothing leaves the device."
+                    setTextColor(Color.parseColor("#6B7280"))
+                    textSize = 13f
+                },
+            )
+            content.addView(
+                UiKit.secondaryButton(this, "Grant access") {
+                    requestCallsPermissionsLauncher.launch(arrayOf(Manifest.permission.READ_CALL_LOG, Manifest.permission.READ_CONTACTS))
+                },
+                LinearLayout.LayoutParams(mp, wc).apply { topMargin = dp(10) },
+            )
+            content.parent as View
+        }
+        callsListContainer = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+        listSection.addView(callsListContainer, LinearLayout.LayoutParams(mp, wc))
+
+        body.addView(ScrollView(this).apply { addView(listSection) }, LinearLayout.LayoutParams(mp, 0, 1f))
+
+        return body
+    }
+
+    private fun updateCallsPermissionCard() {
+        val granted = hasPermission(Manifest.permission.READ_CALL_LOG)
+        callsPermissionCard.visibility = if (granted) View.GONE else View.VISIBLE
+        callsListContainer.visibility = if (granted) View.VISIBLE else View.GONE
+    }
+
+    private fun reloadCallLog() {
+        callLogEntries = CallLogRepository.getRecent(this)
+        renderRecents()
+        renderCallLog()
+    }
+
+    /** A resolved display name for a raw call-log entry, plus enough context to
+     * decide whether "Add/edit name" makes sense (never for a real system
+     * contact — that's Contacts' job, not ours). */
+    private data class ResolvedCaller(val displayName: String, val isSystemContact: Boolean, val ourName: String?)
+
+    /** Resolves a display name for a call-log entry: system contact name first,
+     * then whatever SpamBlok itself has learned for this number (CallerRepository,
+     * Phase 3 — including a name the user typed in manually), then the raw number. */
+    private fun resolveCaller(number: String, cachedSystemName: String?): ResolvedCaller {
+        // A *live* Contacts lookup, not the call log's own CACHED_NAME: that
+        // column is a snapshot from when the call happened, so it stays stale
+        // (or blank) if a contact for this number gets saved afterwards.
+        val liveContactName = if (hasPermission(Manifest.permission.READ_CONTACTS)) {
+            ContactsRepository.lookupName(this, number)
+        } else {
+            null
+        }
+        val systemName = liveContactName ?: cachedSystemName
+        val ours = CallerRepository.lookup(this, number)
+        val ourName = ours?.name?.takeIf { it.isNotBlank() } ?: ours?.label?.takeIf { it.isNotBlank() }
+        val display = systemName?.takeIf { it.isNotBlank() } ?: ourName ?: number.ifBlank { "Unknown" }
+        return ResolvedCaller(display, isSystemContact = !systemName.isNullOrBlank(), ourName = ourName)
+    }
+
+    /** Tapping a number: dial, or — for a number that isn't a real system
+     * contact — add/edit the name SpamBlok itself remembers for it. */
+    private fun showCallOptions(number: String, resolved: ResolvedCaller) {
+        val canEditName = !resolved.isSystemContact
+        val options = if (canEditName) {
+            arrayOf("Call", if (resolved.ourName != null) "Edit name" else "Add name")
+        } else {
+            arrayOf("Call")
+        }
+        AlertDialog.Builder(this)
+            .setTitle(resolved.displayName)
+            .setItems(options) { _, which ->
+                if (which == 0) {
+                    startActivity(Intent(Intent.ACTION_DIAL, Uri.parse("tel:$number")))
+                } else {
+                    showEditNameDialog(number, resolved.ourName)
                 }
             }
-            row.addView(
-                label,
-                LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f).apply {
-                    gravity = android.view.Gravity.CENTER_VERTICAL
+            .show()
+    }
+
+    private fun showEditNameDialog(number: String, existingName: String?) {
+        val input = EditText(this).apply {
+            hint = "Name"
+            setText(existingName ?: "")
+            setSelection(text.length)
+            setPadding(dp(16), dp(12), dp(16), dp(12))
+        }
+        AlertDialog.Builder(this)
+            .setTitle(number)
+            .setView(input)
+            .setPositiveButton("Save") { _, _ ->
+                val name = input.text.toString().trim()
+                if (name.isNotEmpty()) {
+                    CallerRepository.setManualName(this, number, name)
+                    Toast.makeText(this, "Saved", Toast.LENGTH_SHORT).show()
+                    reloadCallLog()
+                }
+            }
+            .setNegativeButton("Cancel", null)
+            .show()
+    }
+
+    private fun renderRecents() {
+        recentsRow.removeAllViews()
+        val seen = LinkedHashSet<String>()
+        val recents = callLogEntries.filter { it.number.isNotBlank() && seen.add(it.number) }.take(8)
+        recents.forEach { e ->
+            val resolved = resolveCaller(e.number, e.displayName)
+            val column = LinearLayout(this).apply {
+                orientation = LinearLayout.VERTICAL
+                gravity = Gravity.CENTER_HORIZONTAL
+                setPadding(dp(4), dp(4), dp(4), dp(4))
+                isClickable = true
+                setOnClickListener { showCallOptions(e.number, resolved) }
+            }
+            column.addView(UiKit.avatar(this, dp(48), UiKit.initialFor(resolved.displayName)), LinearLayout.LayoutParams(dp(48), dp(48)))
+            column.addView(
+                TextView(this).apply {
+                    text = resolved.displayName
+                    textSize = 11f
+                    setTextColor(Color.parseColor("#1A1A2E"))
+                    maxLines = 1
+                    setPadding(0, dp(4), 0, 0)
+                    width = dp(56)
+                    gravity = Gravity.CENTER
+                    ellipsize = android.text.TextUtils.TruncateAt.END
                 },
             )
-            row.addView(remove)
-            blocklistContainer.addView(row)
+            recentsRow.addView(column, LinearLayout.LayoutParams(dp(64), ViewGroup.LayoutParams.WRAP_CONTENT))
+        }
+    }
+
+    private fun renderCallLog() {
+        callsListContainer.removeAllViews()
+        val filter = callSearchFilter.trim().lowercase()
+        val entries = callLogEntries.filter { e ->
+            if (filter.isEmpty()) return@filter true
+            val resolved = resolveCaller(e.number, e.displayName)
+            resolved.displayName.lowercase().contains(filter) || e.number.lowercase().contains(filter)
+        }
+        if (entries.isEmpty()) {
+            callsListContainer.addView(UiKit.emptyStateText(this, if (callSearchFilter.isEmpty()) "No calls yet." else "No matches."))
+            return
+        }
+        val fmt = java.text.SimpleDateFormat("MMM d, HH:mm", java.util.Locale.US)
+        entries.forEach { e ->
+            val resolved = resolveCaller(e.number, e.displayName)
+            val displayName = resolved.displayName
+            val row = LinearLayout(this).apply {
+                orientation = LinearLayout.HORIZONTAL
+                gravity = Gravity.CENTER_VERTICAL
+                setPadding(0, dp(10), 0, dp(10))
+                isClickable = true
+                setOnClickListener { showCallOptions(e.number, resolved) }
+            }
+            row.addView(UiKit.avatar(this, dp(40), UiKit.initialFor(displayName)), LinearLayout.LayoutParams(dp(40), dp(40)).apply { marginEnd = dp(12) })
+
+            val typeColor = when (e.type) {
+                CallLogRepository.CallType.MISSED -> "#EF4444"
+                CallLogRepository.CallType.INCOMING -> "#22C55E"
+                CallLogRepository.CallType.OUTGOING -> "#0066FF"
+                else -> "#6B7280"
+            }
+            val textColumn = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+            textColumn.addView(
+                TextView(this).apply {
+                    text = displayName
+                    setTextColor(Color.parseColor("#1A1A2E"))
+                    textSize = 15f
+                },
+            )
+            textColumn.addView(
+                TextView(this).apply {
+                    val duration = if (e.durationSeconds > 0) " · ${e.durationSeconds}s" else ""
+                    val numberPart = if (displayName != e.number) "${e.number} · " else ""
+                    text = "$numberPart${e.type.name.lowercase().replaceFirstChar { it.uppercase() }} · " +
+                        "${fmt.format(java.util.Date(e.timestampMillis))}$duration"
+                    setTextColor(Color.parseColor(typeColor))
+                    textSize = 12f
+                },
+            )
+            row.addView(textColumn, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
+            callsListContainer.addView(row)
+        }
+    }
+
+    // ---------------------------------------------------------------------
+    // Messages page
+    // ---------------------------------------------------------------------
+
+    private fun buildMessagesPage(): View {
+        val mp = ViewGroup.LayoutParams.MATCH_PARENT
+        val wc = ViewGroup.LayoutParams.WRAP_CONTENT
+        val body = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(16), dp(16), dp(16), dp(24))
+            setBackgroundColor(Color.parseColor("#F5F7FA"))
+        }
+        body.addView(
+            TextView(this).apply {
+                text = "Messages"
+                setTextColor(Color.parseColor("#1A1A2E"))
+                textSize = 18f
+                typeface = Typeface.DEFAULT_BOLD
+            },
+        )
+        messagesPermissionCard = UiKit.card(this, body).let { content ->
+            content.addView(
+                TextView(this).apply {
+                    text = "SpamBlok needs access to your messages to show them here (read-only). Nothing leaves the device."
+                    setTextColor(Color.parseColor("#6B7280"))
+                    textSize = 13f
+                },
+            )
+            content.addView(
+                UiKit.secondaryButton(this, "Grant access") { requestSmsLauncher.launch(Manifest.permission.READ_SMS) },
+                LinearLayout.LayoutParams(mp, wc).apply { topMargin = dp(10) },
+            )
+            content.parent as View
+        }
+        messagesListContainer = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+        body.addView(messagesListContainer, LinearLayout.LayoutParams(mp, wc).apply { topMargin = dp(8) })
+
+        return ScrollView(this).apply { addView(body) }
+    }
+
+    private fun updateMessagesPermissionCard() {
+        val granted = hasPermission(Manifest.permission.READ_SMS)
+        messagesPermissionCard.visibility = if (granted) View.GONE else View.VISIBLE
+        messagesListContainer.visibility = if (granted) View.VISIBLE else View.GONE
+    }
+
+    private fun reloadMessages() {
+        messagesListContainer.removeAllViews()
+        val entries = SmsRepository.getRecent(this)
+        if (entries.isEmpty()) {
+            messagesListContainer.addView(UiKit.emptyStateText(this, "No messages yet."))
+            return
+        }
+        val fmt = java.text.SimpleDateFormat("MMM d, HH:mm", java.util.Locale.US)
+        entries.forEach { e ->
+            val row = LinearLayout(this).apply {
+                orientation = LinearLayout.VERTICAL
+                setPadding(0, dp(10), 0, dp(10))
+            }
+            val topRow = LinearLayout(this).apply {
+                orientation = LinearLayout.HORIZONTAL
+                gravity = Gravity.CENTER_VERTICAL
+            }
+            topRow.addView(
+                TextView(this).apply {
+                    text = if (e.type == SmsRepository.MessageType.SENT) "To ${e.address}" else e.address.ifBlank { "Unknown" }
+                    setTextColor(Color.parseColor("#1A1A2E"))
+                    textSize = 14f
+                    typeface = Typeface.DEFAULT_BOLD
+                },
+                LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f),
+            )
+            topRow.addView(
+                TextView(this).apply {
+                    text = fmt.format(java.util.Date(e.timestampMillis))
+                    setTextColor(Color.parseColor("#6B7280"))
+                    textSize = 11f
+                },
+            )
+            row.addView(topRow)
+            row.addView(
+                TextView(this).apply {
+                    text = e.body
+                    setTextColor(Color.parseColor("#374151"))
+                    textSize = 13f
+                    maxLines = 2
+                },
+            )
+            messagesListContainer.addView(row)
         }
     }
 }

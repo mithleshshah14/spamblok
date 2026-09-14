@@ -111,6 +111,32 @@ object CallerRepository {
         }
     }
 
+    /** User-entered name for a number we don't otherwise have one for (e.g. from
+     * the Calls tab). Unlike [observe], this always wins — it's an explicit,
+     * verified correction from the person using the app, not an inferred guess
+     * subject to mismatch handling. */
+    fun setManualName(context: Context, rawNumber: String, name: String) {
+        val key = normalize(rawNumber)
+        if (key.isEmpty() || name.isBlank()) return
+
+        val db = DbHelper.get(context).writableDatabase
+        val now = System.currentTimeMillis()
+        val values = ContentValues().apply {
+            put(COL_NUMBER, key)
+            put(COL_NAME, name.trim())
+            put(COL_SOURCE, "user")
+            put(COL_VERIFIED, 1)
+            put(COL_LAST_SEEN, now)
+        }
+        if (lookup(context, key) == null) {
+            values.put(COL_FIRST_SEEN, now)
+            values.put(COL_MISMATCH_COUNT, 0)
+            db.insert(TABLE, null, values)
+        } else {
+            db.update(TABLE, values, "$COL_NUMBER = ?", arrayOf(key))
+        }
+    }
+
     private fun android.database.Cursor.toRecord(): CallerRecord = CallerRecord(
         number = getString(getColumnIndexOrThrow(COL_NUMBER)),
         name = getString(getColumnIndexOrThrow(COL_NAME)),
