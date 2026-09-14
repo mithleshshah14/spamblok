@@ -14,6 +14,9 @@
     <string name="blocklist_remove">Remove</string>
     <string name="blocklist_empty">(No blocked prefixes yet.)</string>
     <string name="blocklist_invalid_prefix">Enter at least 2 digits</string>
+    <string name="known_callers_title">Known callers (our own DB)</string>
+    <string name="known_callers_hint">Every number/name SpamBlok has read off a banner, stored locally. Looked up first on the next call from that number.</string>
+    <string name="known_callers_empty">(Nothing learned yet — receive a call with the banner reader active.)</string>
     <string name="captured_log_title">Captured caller log (on-device)</string>
     <string name="log_empty">(No calls captured yet. Complete setup above, then receive a call and tap \"Refresh log\".)</string>
     <string name="accessibility_service_description">Reads the caller name shown by Truecaller/the in-call UI during an incoming call, for SpamBlok\'s own caller-ID overlay. This build only logs locally — it stores and sends nothing.</string>

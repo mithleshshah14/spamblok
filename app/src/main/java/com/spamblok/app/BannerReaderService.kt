@@ -78,6 +78,13 @@ class BannerReaderService : AccessibilityService() {
         if (name != null || label != null || callState != null) {
             CallerInfoStore.onBannerCaptured(name, label, callState, number)
         }
+
+        // Phase 3: store every number->name/label we observe off the banner, so a
+        // later call from the same number can be answered from our own DB first.
+        if (number != null && (name != null || label != null)) {
+            CallerRepository.observe(this, number, name, label, source = "banner:$pkg")
+                ?.let { note -> CallLogStore.append(this, "── ${CallLogStore.timestamp()}  DB  $note\n\n") }
+        }
     }
 
     private fun collectText(

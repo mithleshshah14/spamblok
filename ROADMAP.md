@@ -160,3 +160,27 @@ reconciliation. Just read + log (+ a basic on-device viewer added for convenienc
     from an unsaved number matching a configured prefix. The screening service
     itself is now confirmed to fire correctly, so this should follow the same
     "unsaved number" pattern above.
+- **2026-09-14: Phase 3 implemented (our own DB), needs real-device verification.**
+  - `CallerRepository` is a plain SQLite table (`spamblok_callers.db`, private to
+    the app) keyed by normalized number, storing name/label/source/verified/
+    first-seen/last-seen/mismatch-count. `isMismatch()` (the only real judgment
+    call — does a freshly observed name genuinely disagree with what's stored)
+    is a pure function, unit-tested separately from the DB plumbing, following
+    the same pattern as `PrefixMatcher` in Phase 2.
+  - `BannerReaderService` now calls `CallerRepository.observe(...)` on every
+    name/label it reads off a banner — "store every number→name we observe."
+    A disagreement with an existing entry increments `mismatch_count` and logs
+    a `MISMATCH` line to the on-device caller log; the original name is kept
+    (first-seen wins) rather than overwritten, until Phase 4 gives us a real
+    way to decide which source to trust.
+  - `SpamBlokCallScreeningService` now looks the number up in `CallerRepository`
+    right after screening, before showing the overlay: a DB hit shows the name/
+    label immediately (`CallerInfoStore.onDbLookup`, overlay tags it "(from our
+    DB)"), instead of waiting for the banner. A live banner read (if one still
+    arrives) overrides the DB guess via the existing `onBannerCaptured` path —
+    this *is* the "look up our DB first, fall back to the banner" roadmap goal.
+  - Added a "Known callers (our own DB)" viewer to `MainActivity` for
+    verification (number, name/label, source, last-seen, mismatch count).
+  - **Not yet verified on a real device:** need two calls from the same
+    (unsaved) test number — first to populate the DB via the banner, second to
+    confirm the overlay shows the name instantly from the DB this time.

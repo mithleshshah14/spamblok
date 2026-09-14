@@ -4,7 +4,6 @@ import android.Manifest
 import android.app.role.RoleManager
 import android.content.Intent
 import android.content.pm.PackageManager
-import androidx.core.content.ContextCompat
 import android.graphics.Color
 import android.graphics.Typeface
 import android.net.Uri
@@ -20,6 +19,7 @@ import android.widget.TextView
 import android.widget.Toast
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
+import androidx.core.content.ContextCompat
 
 /**
  * Phase 2 UI: sets up all three pieces SpamBlok needs — the accessibility banner
@@ -32,6 +32,7 @@ class MainActivity : AppCompatActivity() {
     private lateinit var logView: TextView
     private lateinit var blocklistContainer: LinearLayout
     private lateinit var prefixInput: EditText
+    private lateinit var knownCallersView: TextView
 
     // RoleManager's request-role intent must be launched for a RESULT (not a plain
     // startActivity) — RequestRoleActivity reads the *calling* package via
@@ -145,9 +146,31 @@ class MainActivity : AppCompatActivity() {
             orientation = LinearLayout.VERTICAL
         }
 
+        val knownCallersTitle = TextView(this).apply {
+            text = getString(R.string.known_callers_title)
+            textSize = 16f
+            setTypeface(typeface, Typeface.BOLD)
+            setPadding(0, pad, 0, pad / 4)
+        }
+
+        val knownCallersHint = TextView(this).apply {
+            text = getString(R.string.known_callers_hint)
+            textSize = 13f
+        }
+
+        knownCallersView = TextView(this).apply {
+            textSize = 12f
+            setTextIsSelectable(true)
+            typeface = Typeface.MONOSPACE
+            setPadding(0, pad / 2, 0, 0)
+        }
+
         val refresh = Button(this).apply {
             text = getString(R.string.refresh_log)
-            setOnClickListener { reloadLog() }
+            setOnClickListener {
+                reloadLog()
+                reloadKnownCallers()
+            }
         }
 
         val clear = Button(this).apply {
@@ -182,6 +205,9 @@ class MainActivity : AppCompatActivity() {
         content.addView(prefixInput, LinearLayout.LayoutParams(mp, wc).apply { topMargin = pad / 2 })
         content.addView(addPrefix, LinearLayout.LayoutParams(mp, wc))
         content.addView(blocklistContainer, LinearLayout.LayoutParams(mp, wc))
+        content.addView(knownCallersTitle)
+        content.addView(knownCallersHint)
+        content.addView(knownCallersView)
         content.addView(refresh, LinearLayout.LayoutParams(mp, wc).apply { topMargin = pad })
         content.addView(clear, LinearLayout.LayoutParams(mp, wc))
         content.addView(logTitle)
@@ -194,6 +220,7 @@ class MainActivity : AppCompatActivity() {
         super.onResume()
         reloadLog()
         reloadBlocklist()
+        reloadKnownCallers()
     }
 
     private fun requestCallScreeningRole() {
@@ -216,6 +243,20 @@ class MainActivity : AppCompatActivity() {
     private fun reloadLog() {
         val text = CallLogStore.read(this)
         logView.text = if (text.isBlank()) getString(R.string.log_empty) else text
+    }
+
+    private fun reloadKnownCallers() {
+        val records = CallerRepository.getRecent(this)
+        knownCallersView.text = if (records.isEmpty()) {
+            getString(R.string.known_callers_empty)
+        } else {
+            val fmt = java.text.SimpleDateFormat("MM-dd HH:mm", java.util.Locale.US)
+            records.joinToString("\n\n") { r ->
+                val what = listOfNotNull(r.name, r.label).joinToString(" — ").ifBlank { "(no name/label)" }
+                val mismatch = if (r.mismatchCount > 0) " ⚠ ${r.mismatchCount} mismatch(es)" else ""
+                "${r.number}\n  $what$mismatch\n  source: ${r.source ?: "?"} · last seen ${fmt.format(java.util.Date(r.lastSeenMillis))}"
+            }
+        }
     }
 
     private fun reloadBlocklist() {

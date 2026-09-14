@@ -1,10 +1,14 @@
 package com.spamblok.app
 
 /**
- * In-process, in-memory hand-off between the two Phase 2 data sources:
+ * In-process, in-memory hand-off between the Phase 2/3 data sources:
  *  - CallScreeningService: gets the incoming NUMBER first (system API, instant).
+ *  - CallerRepository (Phase 3): our own on-device DB — if we've seen this number
+ *    before, its name/label is available immediately, no waiting for a banner.
  *  - BannerReaderService (accessibility): gets the NAME/label a moment later,
- *    once the Truecaller/in-call overlay actually renders.
+ *    once the Truecaller/in-call overlay actually renders — this is still what
+ *    populates the DB in the first place, and overrides a DB-sourced guess if
+ *    the two ever disagree (see [CallerRepository.observe]'s mismatch handling).
  *
  * There is no cross-process IPC here — both run in this app's own process, so a
  * simple synchronized singleton with a listener is enough to let the overlay
@@ -17,6 +21,7 @@ object CallerInfoStore {
         val name: String? = null,
         val label: String? = null, // e.g. "Reported as Fraud"
         val callState: String? = null,
+        val source: String? = null, // "db" or "banner" — where the current name/label came from
         val updatedAtMillis: Long = System.currentTimeMillis(),
     )
 
@@ -36,7 +41,8 @@ object CallerInfoStore {
         notifyListener()
     }
 
-    /** Called by BannerReaderService when it reads a name/label off the overlay. */
+    /** Called by BannerReaderService when it reads a name/label off the overlay.
+     * Always wins over a "db" sourced guess, since it's the fresher, ground-truth read. */
     fun onBannerCaptured(name: String?, label: String?, callState: String?, bannerNumber: String?) {
         synchronized(lock) {
             val withinWindow = System.currentTimeMillis() - current.updatedAtMillis <= CORRELATION_WINDOW_MS
@@ -46,8 +52,20 @@ object CallerInfoStore {
                 name = name ?: current.name,
                 label = label ?: current.label,
                 callState = callState ?: current.callState,
+                source = if (name != null || label != null) "banner" else current.source,
                 updatedAtMillis = System.currentTimeMillis(),
             )
+        }
+        notifyListener()
+    }
+
+    /** Called by SpamBlokCallScreeningService right after [onNumberScreened] when
+     * our own DB already has a name/label for this number — shows instantly
+     * instead of the overlay's "Looking up name…" placeholder. A later banner
+     * read (if one arrives) still overrides this via [onBannerCaptured]. */
+    fun onDbLookup(name: String?, label: String?) {
+        synchronized(lock) {
+            current = current.copy(name = name, label = label, source = "db", updatedAtMillis = System.currentTimeMillis())
         }
         notifyListener()
     }

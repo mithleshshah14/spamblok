@@ -130,11 +130,16 @@ object OverlayService {
     private fun updateFromInfo(info: CallerInfoStore.CallerInfo) {
         val name = info.name
         val label = info.label
-        nameText?.text = when {
+        val base = when {
             !name.isNullOrBlank() && !label.isNullOrBlank() -> "$name — $label"
             !name.isNullOrBlank() -> name
             !label.isNullOrBlank() -> label
-            else -> "Looking up name…"
+            else -> null
+        }
+        nameText?.text = when {
+            base == null -> "Looking up name…"
+            info.source == "db" -> "$base (from our DB)"
+            else -> base
         }
     }
 
