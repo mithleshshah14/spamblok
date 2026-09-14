@@ -120,3 +120,43 @@ reconciliation. Just read + log (+ a basic on-device viewer added for convenienc
     same numbers; `BlockedPrefixStore` persists prefixes in SharedPreferences.
     Managed from `MainActivity` (add/remove rows); blocked calls are also
     noted in the on-device caller log.
+- **2026-09-14: Phase 2 ✅ VERIFIED on a real Galaxy S25** — `SpamBlokCallScreeningService`
+  confirmed actually invoked by Telecom (`dumpsys telecom` showed
+  `SCREENING_BOUND (com.spamblok.app/...)` and `mCallScreeningAppName = SpamBlok`
+  for a real incoming call). Two real bugs found and fixed along the way, both
+  worth remembering for later phases:
+  - **RoleManager's request-role intent needs `startActivityForResult`, not
+    `startActivity`.** `RequestRoleActivity` reads the *calling* package via
+    `getCallingPackage()`, which Android only populates for an activity-launched-
+    for-result. Launched with plain `startActivity()` it silently no-ops
+    (logcat: `RequestRoleActivity: Package name cannot be null or empty: null`) —
+    no dialog, no error shown to the user. Fixed in `MainActivity` using
+    `registerForActivityResult(ActivityResultContracts.StartActivityForResult())`.
+    This is what looked like a Samsung/OneUI restriction on sideloaded apps at
+    first — it wasn't.
+  - **`READ_PHONE_STATE` was declared in the manifest but never requested at
+    runtime**, so it stayed ungranted. On this device, Telecom silently refuses
+    to ever bind a `CallScreeningService` whose app lacks that permission — no
+    error, it just skips straight to the OEM's own screening, which looked
+    identical to "the role holder is being ignored." Fixed with an explicit
+    in-app runtime-permission step (`MainActivity`, step 3) using
+    `ActivityResultContracts.RequestPermission()`.
+  - **Real-device quirk confirmed, not a bug:** Samsung's Telecom skips 3rd-party
+    call screening entirely for numbers already saved as a Contact on-device
+    (`dumpsys telecom` shows a `contact exists` flag on those calls, and no
+    `SCREENING_BOUND` for our service). Confirmed by A/B: an unsaved test number
+    got properly screened by SpamBlok; a saved-contact number did not. To test
+    Phase 2/3 behavior going forward, always call from a number NOT saved in
+    the test phone's Contacts.
+  - Local dev release signing was added (`app/build.gradle.kts` `signingConfigs`,
+    self-signed key at `keystore/spamblok-release.jks`, gitignored) — turned out
+    not to be the fix, but keeping it since a release-signed build is generally
+    the more realistic thing to test call-screening/role behavior against.
+  - Truecaller's/Samsung's own banner still shows regardless of what SpamBlok
+    does — replacing/auto-dismissing it is explicitly **Phase 5**, not Phase 2.
+    SpamBlok's banner is additive by design at this stage.
+  - **Not yet verified:** the prefix-blocklist's actual silent-reject behavior
+    on a real call (blocked-prefix `respondToCall` path) — needs a test call
+    from an unsaved number matching a configured prefix. The screening service
+    itself is now confirmed to fire correctly, so this should follow the same
+    "unsaved number" pattern above.

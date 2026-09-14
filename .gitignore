@@ -8,6 +8,9 @@ local.properties
 *.apk
 *.aab
 
+# Signing (local dev keystore, never commit)
+/keystore/
+
 # IDE
 .idea/
 *.log

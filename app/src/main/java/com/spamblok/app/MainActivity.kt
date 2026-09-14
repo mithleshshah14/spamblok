@@ -1,7 +1,10 @@
 package com.spamblok.app
 
+import android.Manifest
 import android.app.role.RoleManager
 import android.content.Intent
+import android.content.pm.PackageManager
+import androidx.core.content.ContextCompat
 import android.graphics.Color
 import android.graphics.Typeface
 import android.net.Uri
@@ -15,6 +18,7 @@ import android.widget.LinearLayout
 import android.widget.ScrollView
 import android.widget.TextView
 import android.widget.Toast
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
 
 /**
@@ -28,6 +32,29 @@ class MainActivity : AppCompatActivity() {
     private lateinit var logView: TextView
     private lateinit var blocklistContainer: LinearLayout
     private lateinit var prefixInput: EditText
+
+    // RoleManager's request-role intent must be launched for a RESULT (not a plain
+    // startActivity) — RequestRoleActivity reads the *calling* package via
+    // getCallingPackage(), which is only populated for an activity-for-result launch.
+    // Launched with plain startActivity(), it silently no-ops ("Package name cannot
+    // be null or empty").
+    private val requestRoleLauncher = registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
+        val message = if (result.resultCode == RESULT_OK) {
+            "SpamBlok is now the call-screening app"
+        } else {
+            "Call-screening role request was cancelled"
+        }
+        Toast.makeText(this, message, Toast.LENGTH_SHORT).show()
+    }
+
+    // READ_PHONE_STATE is a dangerous runtime permission. Declaring it in the
+    // manifest alone leaves it ungranted — and on this device at least, Telecom
+    // silently refuses to ever bind SpamBlokCallScreeningService while it's
+    // ungranted (no error, it just skips straight to the OEM's own screening).
+    private val requestPhoneStateLauncher = registerForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
+        val message = if (granted) "Phone-state permission granted" else "Phone-state permission denied"
+        Toast.makeText(this, message, Toast.LENGTH_SHORT).show()
+    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -59,6 +86,19 @@ class MainActivity : AppCompatActivity() {
                     Uri.parse("package:$packageName"),
                 )
                 startActivity(intent)
+            }
+        }
+
+        val requestPhoneState = Button(this).apply {
+            text = getString(R.string.grant_phone_state_permission)
+            setOnClickListener {
+                if (ContextCompat.checkSelfPermission(this@MainActivity, Manifest.permission.READ_PHONE_STATE)
+                    == PackageManager.PERMISSION_GRANTED
+                ) {
+                    Toast.makeText(this@MainActivity, "Already granted", Toast.LENGTH_SHORT).show()
+                } else {
+                    requestPhoneStateLauncher.launch(Manifest.permission.READ_PHONE_STATE)
+                }
             }
         }
 
@@ -135,6 +175,7 @@ class MainActivity : AppCompatActivity() {
         content.addView(info)
         content.addView(openAccessibility, LinearLayout.LayoutParams(mp, wc).apply { topMargin = pad })
         content.addView(openOverlay, LinearLayout.LayoutParams(mp, wc))
+        content.addView(requestPhoneState, LinearLayout.LayoutParams(mp, wc))
         content.addView(requestScreeningRole, LinearLayout.LayoutParams(mp, wc))
         content.addView(blocklistTitle)
         content.addView(blocklistHint)
@@ -169,7 +210,7 @@ class MainActivity : AppCompatActivity() {
             Toast.makeText(this, "SpamBlok is already the call-screening app", Toast.LENGTH_SHORT).show()
             return
         }
-        startActivity(roleManager.createRequestRoleIntent(RoleManager.ROLE_CALL_SCREENING))
+        requestRoleLauncher.launch(roleManager.createRequestRoleIntent(RoleManager.ROLE_CALL_SCREENING))
     }
 
     private fun reloadLog() {
