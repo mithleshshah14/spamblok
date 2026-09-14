@@ -1,7 +1,10 @@
 package com.spamblok.app
 
+import android.app.role.RoleManager
 import android.content.Intent
 import android.graphics.Typeface
+import android.net.Uri
+import android.os.Build
 import android.os.Bundle
 import android.provider.Settings
 import android.view.ViewGroup
@@ -13,8 +16,9 @@ import android.widget.Toast
 import androidx.appcompat.app.AppCompatActivity
 
 /**
- * Phase 1 UI: explains the test, lets the user enable the accessibility service,
- * and shows the on-device captured caller log (refresh / clear).
+ * Phase 2 UI: sets up all three pieces SpamBlok needs — the accessibility banner
+ * reader (Phase 1), the overlay-draw permission, and the system call-screening
+ * role — then shows the on-device captured caller log (refresh / clear).
  */
 class MainActivity : AppCompatActivity() {
 
@@ -33,13 +37,29 @@ class MainActivity : AppCompatActivity() {
         }
 
         val info = TextView(this).apply {
-            text = getString(R.string.phase1_instructions)
+            text = getString(R.string.phase2_instructions)
             textSize = 14f
         }
 
-        val openSettings = Button(this).apply {
+        val openAccessibility = Button(this).apply {
             text = getString(R.string.open_accessibility_settings)
             setOnClickListener { startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS)) }
+        }
+
+        val openOverlay = Button(this).apply {
+            text = getString(R.string.grant_overlay_permission)
+            setOnClickListener {
+                val intent = Intent(
+                    Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
+                    Uri.parse("package:$packageName"),
+                )
+                startActivity(intent)
+            }
+        }
+
+        val requestScreeningRole = Button(this).apply {
+            text = getString(R.string.set_as_call_screener)
+            setOnClickListener { requestCallScreeningRole() }
         }
 
         val refresh = Button(this).apply {
@@ -70,7 +90,9 @@ class MainActivity : AppCompatActivity() {
         }
 
         content.addView(info)
-        content.addView(openSettings, LinearLayout.LayoutParams(mp, wc).apply { topMargin = pad })
+        content.addView(openAccessibility, LinearLayout.LayoutParams(mp, wc).apply { topMargin = pad })
+        content.addView(openOverlay, LinearLayout.LayoutParams(mp, wc))
+        content.addView(requestScreeningRole, LinearLayout.LayoutParams(mp, wc))
         content.addView(refresh, LinearLayout.LayoutParams(mp, wc))
         content.addView(clear, LinearLayout.LayoutParams(mp, wc))
         content.addView(logTitle)
@@ -82,6 +104,23 @@ class MainActivity : AppCompatActivity() {
     override fun onResume() {
         super.onResume()
         reloadLog()
+    }
+
+    private fun requestCallScreeningRole() {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) {
+            Toast.makeText(this, "Call screening role needs Android 10+", Toast.LENGTH_LONG).show()
+            return
+        }
+        val roleManager = getSystemService(RoleManager::class.java)
+        if (roleManager == null || !roleManager.isRoleAvailable(RoleManager.ROLE_CALL_SCREENING)) {
+            Toast.makeText(this, "Call screening role not available on this device", Toast.LENGTH_LONG).show()
+            return
+        }
+        if (roleManager.isRoleHeld(RoleManager.ROLE_CALL_SCREENING)) {
+            Toast.makeText(this, "SpamBlok is already the call-screening app", Toast.LENGTH_SHORT).show()
+            return
+        }
+        startActivity(roleManager.createRequestRoleIntent(RoleManager.ROLE_CALL_SCREENING))
     }
 
     private fun reloadLog() {

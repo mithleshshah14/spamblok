@@ -1,0 +1,40 @@
+package com.spamblok.app
+
+import android.telecom.Call
+import android.telecom.CallScreeningService
+import android.util.Log
+
+/**
+ * Phase 2 — registers SpamBlok as the system call-screening app so we get the
+ * incoming NUMBER the moment a call rings, straight from Telecom (no accessibility
+ * tricks needed for this part).
+ *
+ * We do NOT block or silence anything here yet (that's a later phase, once we trust
+ * our own verdicts). This just records the number + a quick offline heuristic verdict
+ * and shows our own overlay banner; [BannerReaderService] fills in the caller
+ * NAME a little later, once Truecaller's/the in-call UI's overlay actually renders.
+ */
+class SpamBlokCallScreeningService : CallScreeningService() {
+
+    companion object {
+        private const val TAG = "SpamBlokScreening"
+    }
+
+    override fun onScreenCall(callDetails: Call.Details) {
+        val number = callDetails.handle?.schemeSpecificPart
+
+        // Always allow the call through — Phase 2 is "show info", not "block".
+        respondToCall(callDetails, CallResponse.Builder().build())
+
+        if (number.isNullOrBlank()) {
+            Log.d(TAG, "onScreenCall: no number available")
+            return
+        }
+
+        val verdict = NumberHeuristics.classify(number)
+        Log.d(TAG, "onScreenCall: $number -> ${verdict.verdict} (${verdict.label})")
+
+        CallerInfoStore.onNumberScreened(number)
+        OverlayService.show(this, number, verdict)
+    }
+}

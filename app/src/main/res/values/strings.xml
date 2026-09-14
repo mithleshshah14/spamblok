@@ -1,11 +1,13 @@
 <resources>
-    <string name="app_name">SpamBlok (Phase 1)</string>
+    <string name="app_name">SpamBlok (Phase 2)</string>
     <string name="accessibility_service_label">SpamBlok Banner Reader</string>
-    <string name="open_accessibility_settings">Open Accessibility Settings</string>
+    <string name="open_accessibility_settings">1. Open Accessibility Settings</string>
+    <string name="grant_overlay_permission">2. Grant \"Display over other apps\"</string>
+    <string name="set_as_call_screener">3. Set SpamBlok as call screener</string>
     <string name="refresh_log">Refresh log</string>
     <string name="clear_log">Clear log</string>
     <string name="captured_log_title">Captured caller log (on-device)</string>
-    <string name="log_empty">(No calls captured yet. Enable the service above, then receive a call and tap \"Refresh log\".)</string>
-    <string name="accessibility_service_description">Reads the caller name shown by Truecaller during an incoming call, for SpamBlok\'s own caller-ID database. This build only logs locally — it stores and sends nothing.</string>
-    <string name="phase1_instructions">Phase 1 — Banner reader test\n\nGoal: confirm we can read the caller name off Truecaller\'s incoming (ringing) screen as text.\n\nSteps:\n1. Tap the button below and enable \"SpamBlok Banner Reader\".\n2. Make sure Truecaller is installed and its caller ID is ON.\n3. Call this phone from another number and let it ring.\n4. On a computer, run:\n      adb logcat -s SpamBlokA11y\n   and watch for the caller name to appear.\n\nThis build only logs locally. It does not store or send anything.</string>
+    <string name="log_empty">(No calls captured yet. Complete setup above, then receive a call and tap \"Refresh log\".)</string>
+    <string name="accessibility_service_description">Reads the caller name shown by Truecaller/the in-call UI during an incoming call, for SpamBlok\'s own caller-ID overlay. This build only logs locally — it stores and sends nothing.</string>
+    <string name="phase2_instructions">Phase 2 — number + our own banner\n\nSpamBlok gets the incoming NUMBER directly from the system (as the call screener), reads the caller NAME off the in-call UI/Truecaller overlay (Phase 1), and shows both in SpamBlok\'s own banner while the phone rings.\n\nSetup (all three needed):\n1. Enable \"SpamBlok Banner Reader\" in Accessibility Settings.\n2. Grant \"Display over other apps\" so SpamBlok can show its banner.\n3. Set SpamBlok as the system call-screening app.\n\nThen call this phone from another number and watch for SpamBlok\'s banner at the top of the screen while it rings. Nothing is uploaded — everything stays on-device.</string>
 </resources>

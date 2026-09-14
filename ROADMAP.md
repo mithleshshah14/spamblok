@@ -89,3 +89,25 @@ reconciliation. Just read + log (+ a basic on-device viewer added for convenienc
   name + spam label are readable pre-answer (see Phase 1 RESULT). Heuristics engine
   + data-sources analysis also done. Next: **Phase 2** (CallScreeningService +
   our own banner), starting with narrowing the capture filter.
+- **2026-09-14: Phase 2 implemented, needs real-device verification.**
+  - `SpamBlokCallScreeningService` registers as the system call-screening app and
+    gets the incoming number instantly via Telecom; always allows the call
+    (no blocking yet — that's a later phase) and runs it through
+    `NumberHeuristics` for an immediate offline verdict.
+  - `CallerInfoStore` is the in-process hand-off: the number arrives first from
+    the screening service, the name/label arrive slightly later from
+    `BannerReaderService`; whichever overlay listener is showing gets a live
+    update either way.
+  - `OverlayService` draws SpamBlok's own small `TYPE_APPLICATION_OVERLAY`
+    banner (number + verdict immediately, name/label filled in once read),
+    auto-dismissing after 45s.
+  - `BannerReaderService` narrowed per the Phase 1 noise note: dropped the
+    generic `"dialer"` package hint (it was matching the call-log screen, not
+    just the in-call UI) and now only records/forwards events that carry an
+    `id/call_state` node, i.e. an actual ringing/active call screen.
+  - `MainActivity` now walks through all three setup steps: enable the
+    accessibility service, grant "display over other apps", and request the
+    `ROLE_CALL_SCREENING` role via `RoleManager`.
+  - Builds and unit tests pass; **not yet verified on a real device** — same
+    process as Phase 1: enable all three permissions, place a real incoming
+    call, confirm the banner appears and updates with the name.

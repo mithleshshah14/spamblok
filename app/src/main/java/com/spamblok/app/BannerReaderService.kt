@@ -6,12 +6,14 @@ import android.view.accessibility.AccessibilityEvent
 import android.view.accessibility.AccessibilityNodeInfo
 
 /**
- * Phase 1 — reads caller info shown by the dialer / Truecaller and records it.
+ * Reads caller info shown by the in-call UI / Truecaller overlay and records it.
  *
  * When a window from Truecaller or the in-call UI appears or changes, we walk its
- * view tree and collect every piece of text. We log it (adb logcat -s SpamBlokA11y)
- * AND append it to an on-device file (CallLogStore) so it can be reviewed on the
- * phone itself without a laptop.
+ * view tree and collect every piece of text, keyed by view id where available. We
+ * log it (adb logcat -s SpamBlokA11y), append it to an on-device file (CallLogStore)
+ * for on-phone review, and (Phase 2) push the structured name/label into
+ * [CallerInfoStore] so it can be joined with the number from [SpamBlokCallScreeningService]
+ * and shown on our own overlay.
  *
  * The file lives in the app's private internal storage. Nothing is uploaded.
  */
@@ -19,8 +21,9 @@ class BannerReaderService : AccessibilityService() {
 
     companion object {
         private const val TAG = "SpamBlokA11y"
-        // Match Truecaller + the in-call/dialer screens (covers the ring-time name).
-        private val PACKAGE_HINTS = listOf("truecaller", "incallui", "dialer")
+        // Only the in-call UI and Truecaller — NOT the generic "dialer" package, whose
+        // call-log/contacts screens produced ~1,400 lines of irrelevant noise in Phase 1.
+        private val PACKAGE_HINTS = listOf("incallui", "truecaller")
     }
 
     /** Last block written, to skip the many duplicate CONTENT_CHANGED events. */
@@ -33,9 +36,9 @@ class BannerReaderService : AccessibilityService() {
         if (PACKAGE_HINTS.none { pkg.contains(it, ignoreCase = true) }) return
 
         val typeName = AccessibilityEvent.eventTypeToString(event.eventType)
-        Log.d(TAG, "==== event from '$pkg' type=$typeName ====")
 
         val found = mutableListOf<String>()
+        val byId = mutableMapOf<String, String>()
 
         event.text?.forEach { cs ->
             cs?.toString()?.trim()?.takeIf { it.isNotEmpty() }?.let { found.add("event.text: $it") }
@@ -43,44 +46,63 @@ class BannerReaderService : AccessibilityService() {
 
         val root: AccessibilityNodeInfo? = rootInActiveWindow
         if (root != null) {
-            collectText(root, found)
+            collectText(root, found, byId)
         }
 
-        if (found.isEmpty()) {
-            Log.d(TAG, "(no readable text found)")
-            return
-        }
+        if (found.isEmpty()) return
 
+        // Only care about screens that actually look like a live call (ringing or
+        // active) — this is what the Phase 1 roadmap flagged for the noise fix.
+        val callState = byId["id/call_state"]
+        val looksLikeLiveCall = callState != null || byId.keys.any { it.contains("call_state") }
+        if (!looksLikeLiveCall) return
+
+        Log.d(TAG, "==== event from '$pkg' type=$typeName state=$callState ====")
         found.forEach { Log.d(TAG, it) }
 
         // Dedupe: skip if identical to the last block we recorded.
         val signature = "$pkg|$typeName|" + found.joinToString("|")
-        if (signature == lastSignature) return
-        lastSignature = signature
-
-        val block = buildString {
-            append("── ${CallLogStore.timestamp()}  $pkg  $typeName\n")
-            found.forEach { append("   $it\n") }
-            append("\n")
+        if (signature != lastSignature) {
+            lastSignature = signature
+            val block = buildString {
+                append("── ${CallLogStore.timestamp()}  $pkg  $typeName\n")
+                found.forEach { append("   $it\n") }
+                append("\n")
+            }
+            CallLogStore.append(this, block)
         }
-        CallLogStore.append(this, block)
+
+        val name = byId["id/name"]
+        val label = byId["id/location_info"]
+        val number = byId["id/phone_number"]
+        if (name != null || label != null || callState != null) {
+            CallerInfoStore.onBannerCaptured(name, label, callState, number)
+        }
     }
 
-    private fun collectText(node: AccessibilityNodeInfo?, out: MutableList<String>) {
+    private fun collectText(
+        node: AccessibilityNodeInfo?,
+        out: MutableList<String>,
+        byId: MutableMap<String, String>,
+    ) {
         if (node == null) return
 
-        val id = node.viewIdResourceName ?: "?"
-        node.text?.toString()?.trim()?.takeIf { it.isNotEmpty() }?.let {
-            out.add("text [$id]: $it")
+        val id = node.viewIdResourceName
+        node.text?.toString()?.trim()?.takeIf { it.isNotEmpty() }?.let { text ->
+            out.add("text [${id ?: "?"}]: $text")
+            id?.let { byId[shortId(it)] = text }
         }
-        node.contentDescription?.toString()?.trim()?.takeIf { it.isNotEmpty() }?.let {
-            out.add("desc [$id]: $it")
+        node.contentDescription?.toString()?.trim()?.takeIf { it.isNotEmpty() }?.let { desc ->
+            out.add("desc [${id ?: "?"}]: $desc")
         }
 
         for (i in 0 until node.childCount) {
-            collectText(node.getChild(i), out)
+            collectText(node.getChild(i), out, byId)
         }
     }
+
+    /** "com.samsung.android.incallui:id/name" -> "id/name" */
+    private fun shortId(fullId: String): String = fullId.substringAfter(':', fullId)
 
     override fun onInterrupt() {
         // No-op.
