@@ -236,3 +236,16 @@ reconciliation. Just read + log (+ a basic on-device viewer added for convenienc
     component, not directly from the `CallScreeningService` callback) is kept
     even though it turned out not to be the fix — it's a reasonable thing to
     have regardless.
+- **2026-09-15: Overlay redesigned as a rounded card + verified over the lock
+  screen.** Restyled from a full-width bar to a Truecaller-style floating
+  card: 16dp side margins, 16dp corner radius, `#0066FF` background, a top
+  bar (status tag + tap-to-dismiss "✕"), a body row (circular initial avatar +
+  bold name/number + subtitle), and a footer (source of the info — "Live
+  lookup" / "From our DB" — + "SpamBlok" branding). Deliberately doesn't show
+  a fabricated SIM/carrier indicator ("Airtel · SIM 2") since we don't
+  actually have that data — the footer shows real info instead.
+  Also found and fixed a real second bug during this pass: the overlay never
+  appeared while the phone was locked, because `TYPE_APPLICATION_OVERLAY`
+  windows stay behind the lock screen by default (the system InCallUI draws
+  on top of it) — needs `FLAG_SHOW_WHEN_LOCKED` explicitly. Both the new card
+  design and lock-screen visibility are now confirmed working on a real call.
