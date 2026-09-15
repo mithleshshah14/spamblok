@@ -293,3 +293,42 @@ reconciliation. Just read + log (+ a basic on-device viewer added for convenienc
     release-signed APK installed already, so `assembleDebug` failed to
     install with `INSTALL_FAILED_UPDATE_INCOMPATIBLE` (signature mismatch).
     This project installs release builds on-device, not debug.
+- **2026-09-15: Calls-tab search extended two ways — local DB/Contacts lookup
+  for any typed number, and an on-demand Truecaller search fallback.**
+  1. **Local:** search previously only filtered existing call-log rows. Now,
+     when the typed text looks like a number (`looksLikeNumberSearch()`),
+     `renderCallLog()` runs `resolveCaller()` directly against it (live
+     Contacts + `CallerRepository`) and shows a result card even for a number
+     that's never appeared in the call log, with Call/Add-name actions.
+  2. **Truecaller fallback:** when that local lookup can't resolve a number,
+     the same card now offers a "Search Truecaller" button. There's no
+     documented public deep-link scheme for querying Truecaller — confirmed by
+     web search and by `adb shell dumpsys package com.truecaller`, which lists
+     `truecaller://` only for specific authorities (`premium`, `offerhub`,
+     `truecallersdk`), not a generic number-search path. Instead, found (by
+     testing live against the installed app) that firing an explicit
+     `ACTION_VIEW` intent with `tel:<number>` at the exported component
+     `com.truecaller/.DialerActivityAlias` opens Truecaller's own dialer
+     screen **with a live caller-ID card already rendered for that number**
+     (verified via `uiautomator dump` + a real search — resolved "Zomato" /
+     "+918035735864" for a real number in testing). New `TruecallerSearchBridge`
+     (one-shot callback + 4s timeout) arms before the intent fires;
+     `BannerReaderService.onAccessibilityEvent()` — already reading
+     Truecaller's screens for the live-call banner — now also checks
+     `id/title`/`id/subtitle` (the caller-ID card's resource ids, found via
+     the same `uiautomator dump`) whenever the bridge has a pending search,
+     delivers the result, and `MainActivity` snaps back to the foreground
+     (`FLAG_ACTIVITY_REORDER_TO_FRONT`) and saves it into `CallerRepository`
+     (source `"truecaller-search"`) so future lookups are instant/local.
+     Since Android can only expose a window's content once it's actually
+     rendered, this needs a brief (~hundreds of ms) visible flash to
+     Truecaller before returning — confirmed acceptable trade-off with the
+     user given no free API returns real caller names (a real Truecaller API
+     plan starts around $299/mo; free tiers like NumVerify only validate
+     numbers, no name data).
+     **Caveat:** `DialerActivityAlias` / `id/title` / `id/subtitle` are
+     undocumented internals of the installed Truecaller build — not a stable
+     public API. This can break silently on a Truecaller update; if the
+     "Search Truecaller" button stops returning results, re-run
+     `uiautomator dump` after firing the same test intent to check whether
+     the resource ids changed.
