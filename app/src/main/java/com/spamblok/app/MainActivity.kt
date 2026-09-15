@@ -579,8 +579,13 @@ class MainActivity : AppCompatActivity() {
     }
 
     /** Tapping a message row: the list truncates the body to 2 lines, so this shows
-     * the full text (selectable — handy for copying an OTP) plus a Copy button. */
-    private fun showMessageDetail(sender: String, body: String, timestamp: String) {
+     * the full text (selectable — handy for copying an OTP), a Copy button, and a
+     * Reply button. SpamBlok is read-only (no SEND_SMS/default-SMS-app status, by
+     * design — see Messages tab's permission card), so Reply hands off to the
+     * phone's own SMS compose screen via ACTION_SENDTO rather than sending
+     * in-app — same pattern as the Calls tab's "Call" action handing off to the
+     * dialer instead of placing a call directly. */
+    private fun showMessageDetail(address: String, sender: String, body: String, timestamp: String) {
         val bodyView = TextView(this).apply {
             text = body
             setTextIsSelectable(true)
@@ -598,7 +603,10 @@ class MainActivity : AppCompatActivity() {
                     addView(bodyView)
                 },
             )
-            .setPositiveButton("Copy") { _, _ ->
+            .setPositiveButton("Reply") { _, _ ->
+                startActivity(Intent(Intent.ACTION_SENDTO, Uri.parse("smsto:$address")))
+            }
+            .setNeutralButton("Copy") { _, _ ->
                 val clipboard = getSystemService(CLIPBOARD_SERVICE) as android.content.ClipboardManager
                 clipboard.setPrimaryClip(android.content.ClipData.newPlainText("Message", body))
                 Toast.makeText(this, "Copied", Toast.LENGTH_SHORT).show()
@@ -636,7 +644,7 @@ class MainActivity : AppCompatActivity() {
                 orientation = LinearLayout.HORIZONTAL
                 setPadding(0, dp(10), 0, dp(10))
                 isClickable = true
-                setOnClickListener { showMessageDetail(senderLabel, e.body, fmt.format(java.util.Date(e.timestampMillis))) }
+                setOnClickListener { showMessageDetail(e.address, senderLabel, e.body, fmt.format(java.util.Date(e.timestampMillis))) }
             }
             val avatarSize = dp(36)
             val avatar = if (category == MessageClassifier.Category.PERSONAL) {
