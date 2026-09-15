@@ -63,6 +63,11 @@ class SettingsActivity : AppCompatActivity() {
         reloadSetupStatus()
     }
 
+    private val requestBrowserRoleLauncher = registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
+        val message = if (result.resultCode == RESULT_OK) "SpamBlok is now your link-opening app" else "Link protection request was cancelled"
+        Toast.makeText(this, message, Toast.LENGTH_SHORT).show()
+    }
+
     private val requestPhoneStateLauncher = registerForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
         Toast.makeText(this, if (granted) "Phone-state permission granted" else "Phone-state permission denied", Toast.LENGTH_SHORT).show()
         reloadSetupStatus()
@@ -261,16 +266,24 @@ class SettingsActivity : AppCompatActivity() {
         UiKit.sectionHint(
             this,
             linkProtectionCard,
-            "Optional. Once turned on in Android's own settings, tapping ANY link " +
-                "anywhere on your phone — WhatsApp, Messages, any app — checks it here " +
-                "first, then opens your browser if it's safe. Uses the same API key above.",
+            "Optional. Makes SpamBlok your device's link-opening app: a tapped link " +
+                "checks here first, then opens your browser if it's safe. Uses the same " +
+                "API key above. Note: WhatsApp and Messages open links in their own " +
+                "built-in browser, which bypasses this — for those, paste the link into " +
+                "the Links tab instead.",
         )
         linkProtectionCard.addView(
-            UiKit.secondaryButton(this, "Open Android's link settings") {
-                startActivity(
-                    Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.parse("package:$packageName")),
-                )
-                Toast.makeText(this, "Look for \"Open by default\" or \"Set as default\" → add SpamBlok for links", Toast.LENGTH_LONG).show()
+            UiKit.secondaryButton(this, "Set SpamBlok as link-opening app") {
+                val roleManager = getSystemService(RoleManager::class.java)
+                if (roleManager == null || !roleManager.isRoleAvailable(RoleManager.ROLE_BROWSER)) {
+                    Toast.makeText(this, "Browser role not available on this device", Toast.LENGTH_LONG).show()
+                    return@secondaryButton
+                }
+                if (roleManager.isRoleHeld(RoleManager.ROLE_BROWSER)) {
+                    Toast.makeText(this, "SpamBlok is already your link-opening app", Toast.LENGTH_SHORT).show()
+                    return@secondaryButton
+                }
+                requestBrowserRoleLauncher.launch(roleManager.createRequestRoleIntent(RoleManager.ROLE_BROWSER))
             },
             LinearLayout.LayoutParams(mp, wc).apply { topMargin = dp(10) },
         )
