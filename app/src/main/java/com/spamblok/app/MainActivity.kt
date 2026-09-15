@@ -303,10 +303,15 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
+    /** Brings SpamBlok back to the foreground after a "Search Truecaller" round trip
+     * and actually closes Truecaller's screen — CLEAR_TOP finishes whatever ended up
+     * on top of this activity in the back stack (Truecaller's dialer, in this case),
+     * not just reorder past it. REORDER_TO_FRONT alone left it sitting behind us in
+     * the stack instead of gone, so Back landed back on it. */
     private fun bringToFront() {
         startActivity(
             Intent(this, MainActivity::class.java).apply {
-                flags = Intent.FLAG_ACTIVITY_REORDER_TO_FRONT or Intent.FLAG_ACTIVITY_SINGLE_TOP
+                flags = Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP
             },
         )
     }
