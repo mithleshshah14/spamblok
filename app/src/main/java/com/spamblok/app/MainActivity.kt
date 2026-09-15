@@ -2,6 +2,8 @@ package com.spamblok.app
 
 import android.Manifest
 import android.app.AlertDialog
+import android.content.ActivityNotFoundException
+import android.content.ComponentName
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.graphics.Color
@@ -258,6 +260,44 @@ class MainActivity : AppCompatActivity() {
         return ResolvedCaller(display, isSystemContact = !systemName.isNullOrBlank(), ourName = ourName)
     }
 
+    /** On-demand lookup via the Truecaller app already installed on this device: briefly
+     * opens Truecaller's own dialer screen for [number] (it shows a caller-ID card there
+     * even without placing a call), reads the name/label off it via [BannerReaderService]'s
+     * accessibility access, records it into our own DB like any other observed name, then
+     * snaps back to SpamBlok. Requires Truecaller installed and our accessibility service
+     * enabled; on-screen for a brief moment (a few hundred ms) since Android can only expose
+     * a window's content once it's actually rendered. */
+    private fun searchTruecaller(number: String) {
+        Toast.makeText(this, "Checking Truecaller…", Toast.LENGTH_SHORT).show()
+        TruecallerSearchBridge.startSearch(number) { name, subtitle ->
+            bringToFront()
+            if (name != null) {
+                CallerRepository.observe(this, number, name, subtitle, source = "truecaller-search")
+                Toast.makeText(this, "Found: $name", Toast.LENGTH_SHORT).show()
+            } else {
+                Toast.makeText(this, "No result from Truecaller", Toast.LENGTH_SHORT).show()
+            }
+            renderCallLog()
+        }
+        val intent = Intent(Intent.ACTION_VIEW, Uri.parse("tel:$number")).apply {
+            component = ComponentName("com.truecaller", "com.truecaller.DialerActivityAlias")
+        }
+        try {
+            startActivity(intent)
+        } catch (e: ActivityNotFoundException) {
+            TruecallerSearchBridge.deliver(null, null)
+            Toast.makeText(this, "Truecaller isn't installed", Toast.LENGTH_SHORT).show()
+        }
+    }
+
+    private fun bringToFront() {
+        startActivity(
+            Intent(this, MainActivity::class.java).apply {
+                flags = Intent.FLAG_ACTIVITY_REORDER_TO_FRONT or Intent.FLAG_ACTIVITY_SINGLE_TOP
+            },
+        )
+    }
+
     /** Tapping a number: dial, or — for a number that isn't a real system
      * contact — add/edit the name SpamBlok itself remembers for it. */
     private fun showCallOptions(number: String, resolved: ResolvedCaller) {
@@ -381,6 +421,12 @@ class MainActivity : AppCompatActivity() {
                 )
                 row.addView(textColumn, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
                 content.addView(row)
+                if (resolved.displayName == rawFilter) {
+                    content.addView(
+                        UiKit.secondaryButton(this, "Search Truecaller") { searchTruecaller(rawFilter) },
+                        LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { topMargin = dp(10) },
+                    )
+                }
             }
         }
 

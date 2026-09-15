@@ -51,6 +51,19 @@ class BannerReaderService : AccessibilityService() {
 
         if (found.isEmpty()) return
 
+        // On-demand number search (MainActivity's "Search Truecaller" button): while
+        // armed, Truecaller's own dialer screen shows a caller-ID card under these ids
+        // for the number we just launched it with — hand it back and stop, regardless
+        // of the live-call gate below (this isn't a call, so there's no call_state).
+        if (TruecallerSearchBridge.hasPending() && pkg.contains("truecaller", ignoreCase = true)) {
+            val title = byId["id/title"] ?: byId["id/name"]
+            if (title != null) {
+                val subtitle = (byId["id/subtitle"] ?: byId["id/location_info"] ?: byId["id/number_type"])?.trim()
+                Log.d(TAG, "[search] resolved '$title' / '$subtitle' from Truecaller")
+                TruecallerSearchBridge.deliver(title, subtitle)
+            }
+        }
+
         // Only care about screens that actually look like a live call (ringing or
         // active) — this is what the Phase 1 roadmap flagged for the noise fix.
         val callState = byId["id/call_state"]
