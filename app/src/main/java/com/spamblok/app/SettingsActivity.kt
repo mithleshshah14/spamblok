@@ -188,6 +188,17 @@ class SettingsActivity : AppCompatActivity() {
             },
             LinearLayout.LayoutParams(mp, wc).apply { topMargin = dp(4) },
         )
+        body.addView(
+            UiKit.textButton(this, "Debug: view captured caller log") {
+                val log = CallLogStore.read(this)
+                android.app.AlertDialog.Builder(this)
+                    .setTitle("Captured caller log")
+                    .setMessage(log.ifBlank { "(empty)" })
+                    .setPositiveButton("Close", null)
+                    .show()
+            },
+            LinearLayout.LayoutParams(mp, wc).apply { topMargin = dp(4) },
+        )
 
         root.addView(ScrollView(this).apply { addView(body) }, LinearLayout.LayoutParams(mp, 0, 1f))
         setContentView(root)

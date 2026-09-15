@@ -85,17 +85,33 @@ class BannerReaderService : AccessibilityService() {
             CallLogStore.append(this, block)
         }
 
-        val name = byId["id/name"]
-        val label = byId["id/location_info"]
+        // Samsung's stock incallui (Jio and others' carrier-network spam detection)
+        // reuses this SAME "id/name" field to show a warning like "Suspected Spam" or
+        // "SPAM Alert from Jio" instead of a real caller name — it isn't Truecaller,
+        // and there's no separate field to tell the two apart structurally. Treat
+        // anything that looks like a spam warning as a label, never a name: showing
+        // it as the "name" overwrote the real (Truecaller-sourced) identification and
+        // stored the warning text itself into our DB as if it were the caller's name.
+        val rawName = byId["id/name"]
+        val isSpamWarning = SpamLabelHeuristics.looksLikeSpamWarning(rawName)
+        // Also reject a "name" that's just the phone number echoed back — Samsung's
+        // incallui does this as a fallback when it has no real identification, and
+        // once stored, CallerRepository's mismatch-protection would otherwise lock
+        // it in and refuse to let a later, real name (e.g. from Search Truecaller)
+        // ever override it.
+        val isBareNumber = SpamLabelHeuristics.looksLikeBareNumber(rawName)
+        val name = rawName?.takeIf { !isSpamWarning && !isBareNumber }
+        val locationLabel = byId["id/location_info"]
         val number = byId["id/phone_number"]
-        if (name != null || label != null || callState != null) {
-            CallerInfoStore.onBannerCaptured(name, label, callState, number)
+        if (name != null || locationLabel != null || isSpamWarning || callState != null) {
+            CallerInfoStore.onBannerCaptured(name, locationLabel ?: rawName.takeIf { isSpamWarning }, callState, number)
         }
 
         // Phase 3: store every number->name/label we observe off the banner, so a
         // later call from the same number can be answered from our own DB first.
-        if (number != null && (name != null || label != null)) {
-            CallerRepository.observe(this, number, name, label, source = "banner:$pkg")
+        // Never persist the carrier spam-warning text itself as a name/label.
+        if (number != null && (name != null || locationLabel != null)) {
+            CallerRepository.observe(this, number, name, locationLabel, source = "banner:$pkg")
                 ?.let { note -> CallLogStore.append(this, "── ${CallLogStore.timestamp()}  DB  $note\n\n") }
         }
     }

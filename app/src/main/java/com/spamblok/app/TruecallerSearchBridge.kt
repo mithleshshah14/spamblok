@@ -11,7 +11,7 @@ import android.os.Looper
  * into ours, in-process.
  */
 object TruecallerSearchBridge {
-    private const val TIMEOUT_MS = 4000L
+    private const val TIMEOUT_MS = 6000L
 
     private var pendingNumber: String? = null
     private var callback: ((name: String?, subtitle: String?) -> Unit)? = null
@@ -37,6 +37,11 @@ object TruecallerSearchBridge {
      * around afterwards) won't trigger a second, stale callback. */
     fun deliver(name: String?, subtitle: String?) {
         val cb = callback ?: return
+        // Truecaller's own screen briefly shows the searched number itself as a
+        // placeholder "title" before its network lookup resolves the real name —
+        // don't treat that echo as a result. Keep the bridge armed so a later,
+        // real-name event (or the timeout, if none ever comes) can still deliver.
+        if (name != null && CallerRepository.normalize(name) == pendingNumber) return
         callback = null
         pendingNumber = null
         timeoutRunnable?.let { handler.removeCallbacks(it) }

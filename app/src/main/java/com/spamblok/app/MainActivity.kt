@@ -68,6 +68,11 @@ class MainActivity : AppCompatActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
+        // One-time cleanup for rows the pre-fix BannerReaderService mistakenly wrote
+        // (a carrier spam-warning label like "Suspected Spam" stored as if it were the
+        // caller's real name) — a no-op on every launch after the first.
+        CallerRepository.purgeSpamLikeNames(this)
+
         val root = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
 
         val header = LinearLayout(this).apply {
@@ -253,7 +258,15 @@ class MainActivity : AppCompatActivity() {
         } else {
             null
         }
-        val systemName = liveContactName ?: cachedSystemName
+        // The call log's own CACHED_NAME can itself be carrier/OEM non-name text
+        // (a spam-warning label like "Suspected Spam", or the bare number echoed
+        // back) rather than a real contact name — the system writes that into the
+        // same column. Don't let it outrank a real name we actually resolved (our
+        // own DB, or a live Contacts/Truecaller lookup).
+        val trustedCachedName = cachedSystemName?.takeIf {
+            !SpamLabelHeuristics.looksLikeSpamWarning(it) && !SpamLabelHeuristics.looksLikeBareNumber(it)
+        }
+        val systemName = liveContactName ?: trustedCachedName
         val ours = CallerRepository.lookup(this, number)
         val ourName = ours?.name?.takeIf { it.isNotBlank() } ?: ours?.label?.takeIf { it.isNotBlank() }
         val display = systemName?.takeIf { it.isNotBlank() } ?: ourName ?: number.ifBlank { "Unknown" }
@@ -302,20 +315,16 @@ class MainActivity : AppCompatActivity() {
      * contact — add/edit the name SpamBlok itself remembers for it. */
     private fun showCallOptions(number: String, resolved: ResolvedCaller) {
         val canEditName = !resolved.isSystemContact
-        val options = if (canEditName) {
-            arrayOf("Call", if (resolved.ourName != null) "Edit name" else "Add name")
-        } else {
-            arrayOf("Call")
+        val actions = mutableListOf<Pair<String, () -> Unit>>(
+            "Call" to { startActivity(Intent(Intent.ACTION_DIAL, Uri.parse("tel:$number"))) },
+        )
+        if (canEditName) {
+            actions.add((if (resolved.ourName != null) "Edit name" else "Add name") to { showEditNameDialog(number, resolved.ourName) })
+            actions.add("Search Truecaller" to { searchTruecaller(number) })
         }
         AlertDialog.Builder(this)
             .setTitle(resolved.displayName)
-            .setItems(options) { _, which ->
-                if (which == 0) {
-                    startActivity(Intent(Intent.ACTION_DIAL, Uri.parse("tel:$number")))
-                } else {
-                    showEditNameDialog(number, resolved.ourName)
-                }
-            }
+            .setItems(actions.map { it.first }.toTypedArray()) { _, which -> actions[which].second() }
             .show()
     }
 

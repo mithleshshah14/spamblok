@@ -111,6 +111,37 @@ object CallerRepository {
         }
     }
 
+    /** One-time cleanup for rows written by the pre-fix BannerReaderService, which
+     * mistook non-name text in incallui's "id/name" field for a real caller name and
+     * stored it as one — either a carrier spam-warning label (e.g. "Suspected Spam",
+     * "SPAM Alert from Jio") or the bare phone number itself, echoed back as a
+     * fallback when incallui had no real identification. Clears the name (keeps the
+     * number/row, and resets the mismatch count this bug corrupted) wherever it
+     * looks like either; safe to call repeatedly — a no-op once cleaned. Skips
+     * "verified" rows (source = "user"), since those are explicit corrections the
+     * user typed in themselves and can't be this bug. */
+    fun purgeSpamLikeNames(context: Context): Int {
+        val db = DbHelper.get(context).writableDatabase
+        var cleared = 0
+        db.query(TABLE, arrayOf(COL_NUMBER, COL_NAME), "$COL_VERIFIED = 0 AND $COL_NAME IS NOT NULL", null, null, null, null).use { cursor ->
+            val numberIdx = cursor.getColumnIndexOrThrow(COL_NUMBER)
+            val nameIdx = cursor.getColumnIndexOrThrow(COL_NAME)
+            while (cursor.moveToNext()) {
+                val name = cursor.getString(nameIdx) ?: continue
+                if (SpamLabelHeuristics.looksLikeSpamWarning(name) || SpamLabelHeuristics.looksLikeBareNumber(name)) {
+                    db.update(
+                        TABLE,
+                        ContentValues().apply { putNull(COL_NAME); put(COL_MISMATCH_COUNT, 0) },
+                        "$COL_NUMBER = ?",
+                        arrayOf(cursor.getString(numberIdx)),
+                    )
+                    cleared++
+                }
+            }
+        }
+        return cleared
+    }
+
     /** User-entered name for a number we don't otherwise have one for (e.g. from
      * the Calls tab). Unlike [observe], this always wins — it's an explicit,
      * verified correction from the person using the app, not an inferred guess
