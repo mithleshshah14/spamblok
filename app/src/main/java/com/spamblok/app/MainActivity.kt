@@ -37,6 +37,7 @@ class MainActivity : AppCompatActivity() {
     private lateinit var callsPage: View
     private lateinit var messagesPage: View
     private lateinit var callsPermissionCard: View
+    private lateinit var callsPermissionText: TextView
     private lateinit var recentsRow: LinearLayout
     private lateinit var callsListContainer: LinearLayout
     private lateinit var messagesPermissionCard: View
@@ -191,10 +192,9 @@ class MainActivity : AppCompatActivity() {
         callsPermissionCard = UiKit.card(this, listSection).let { content ->
             content.addView(
                 TextView(this).apply {
-                    text = "SpamBlok needs access to your call log to show call history here. Nothing leaves the device."
                     setTextColor(Color.parseColor("#6B7280"))
                     textSize = 13f
-                },
+                }.also { callsPermissionText = it },
             )
             content.addView(
                 UiKit.secondaryButton(this, "Grant access") {
@@ -213,9 +213,19 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun updateCallsPermissionCard() {
-        val granted = hasPermission(Manifest.permission.READ_CALL_LOG)
-        callsPermissionCard.visibility = if (granted) View.GONE else View.VISIBLE
-        callsListContainer.visibility = if (granted) View.VISIBLE else View.GONE
+        val callLogGranted = hasPermission(Manifest.permission.READ_CALL_LOG)
+        val contactsGranted = hasPermission(Manifest.permission.READ_CONTACTS)
+        // Keep prompting for READ_CONTACTS even once READ_CALL_LOG is granted —
+        // e.g. a user who granted call-log access before this permission was
+        // added would otherwise never see this card (and never get asked)
+        // again, silently losing live Contacts-name resolution.
+        callsPermissionCard.visibility = if (callLogGranted && contactsGranted) View.GONE else View.VISIBLE
+        callsListContainer.visibility = if (callLogGranted) View.VISIBLE else View.GONE
+        callsPermissionText.text = if (!callLogGranted) {
+            "SpamBlok needs access to your call log to show call history here. Nothing leaves the device."
+        } else {
+            "SpamBlok needs Contacts access to show saved names for callers instead of just numbers. Nothing leaves the device."
+        }
     }
 
     private fun reloadCallLog() {
