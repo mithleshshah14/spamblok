@@ -38,6 +38,7 @@ class MainActivity : AppCompatActivity() {
 
     private lateinit var callsPage: View
     private lateinit var messagesPage: View
+    private lateinit var linksPage: View
     private lateinit var callsPermissionCard: View
     private lateinit var callsPermissionText: TextView
     private lateinit var recentsRow: LinearLayout
@@ -45,6 +46,10 @@ class MainActivity : AppCompatActivity() {
     private lateinit var messagesPermissionCard: View
     private lateinit var messagesCategoryRow: LinearLayout
     private lateinit var messagesListContainer: LinearLayout
+    private lateinit var linksSetupCard: View
+    private lateinit var linksCheckCard: View
+    private lateinit var linkUrlInput: EditText
+    private lateinit var linkResultView: TextView
 
     private var callLogEntries: List<CallLogRepository.Entry> = emptyList()
     private var callSearchFilter: String = ""
@@ -110,18 +115,28 @@ class MainActivity : AppCompatActivity() {
         val pageContainer = FrameLayout(this)
         callsPage = buildCallsPage()
         messagesPage = buildMessagesPage()
+        linksPage = buildLinksPage()
         pageContainer.addView(callsPage)
         pageContainer.addView(messagesPage)
+        pageContainer.addView(linksPage)
         root.addView(pageContainer, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f))
 
         val navCallsId = View.generateViewId()
         val navMessagesId = View.generateViewId()
+        val navLinksId = View.generateViewId()
         val bottomNav = BottomNavigationView(this).apply {
             menu.add(0, navCallsId, 0, "Calls")
             menu.add(0, navMessagesId, 1, "Messages")
+            menu.add(0, navLinksId, 2, "Links")
             selectedItemId = navCallsId
             setOnItemSelectedListener { item ->
-                showPage(if (item.itemId == navMessagesId) messagesPage else callsPage)
+                showPage(
+                    when (item.itemId) {
+                        navMessagesId -> messagesPage
+                        navLinksId -> linksPage
+                        else -> callsPage
+                    },
+                )
                 true
             }
         }
@@ -134,6 +149,8 @@ class MainActivity : AppCompatActivity() {
     private fun showPage(page: View) {
         callsPage.visibility = if (page === callsPage) View.VISIBLE else View.GONE
         messagesPage.visibility = if (page === messagesPage) View.VISIBLE else View.GONE
+        linksPage.visibility = if (page === linksPage) View.VISIBLE else View.GONE
+        if (page === linksPage) updateLinksSetupCard()
     }
 
     override fun onResume() {
@@ -142,6 +159,7 @@ class MainActivity : AppCompatActivity() {
         if (hasPermission(Manifest.permission.READ_SMS)) reloadMessages()
         updateCallsPermissionCard()
         updateMessagesPermissionCard()
+        updateLinksSetupCard()
     }
 
     // ---------------------------------------------------------------------
@@ -688,5 +706,99 @@ class MainActivity : AppCompatActivity() {
             row.addView(textColumn, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
             messagesListContainer.addView(row)
         }
+    }
+
+    // ---------------------------------------------------------------------
+    // Links page — paste a URL, check it against Google Safe Browsing.
+    // ---------------------------------------------------------------------
+
+    private fun buildLinksPage(): View {
+        val mp = ViewGroup.LayoutParams.MATCH_PARENT
+        val wc = ViewGroup.LayoutParams.WRAP_CONTENT
+        val body = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(16), dp(16), dp(16), dp(24))
+            setBackgroundColor(Color.parseColor("#F5F7FA"))
+        }
+        body.addView(
+            TextView(this).apply {
+                text = "Link safety check"
+                setTextColor(Color.parseColor("#1A1A2E"))
+                textSize = 18f
+                typeface = Typeface.DEFAULT_BOLD
+            },
+        )
+
+        linksSetupCard = UiKit.card(this, body).let { content ->
+            content.addView(
+                TextView(this).apply {
+                    text = "Paste a suspicious link from a message and check it against Google " +
+                        "Safe Browsing before you tap it. Needs a free API key — set one up in Settings."
+                    setTextColor(Color.parseColor("#6B7280"))
+                    textSize = 13f
+                },
+            )
+            content.addView(
+                UiKit.secondaryButton(this, "Open Settings") { startActivity(Intent(this, SettingsActivity::class.java)) },
+                LinearLayout.LayoutParams(mp, wc).apply { topMargin = dp(10) },
+            )
+            content.parent as View
+        }
+
+        linksCheckCard = UiKit.card(this, body).let { content ->
+            linkUrlInput = EditText(this).apply {
+                hint = "Paste a URL to check"
+                setPadding(dp(14), dp(10), dp(14), dp(10))
+                background = UiKit.fieldBackground(this@MainActivity)
+                textSize = 14f
+            }
+            content.addView(linkUrlInput)
+            content.addView(
+                UiKit.secondaryButton(this, "Check") { checkPastedLink() },
+                LinearLayout.LayoutParams(mp, wc).apply { topMargin = dp(10) },
+            )
+            linkResultView = TextView(this).apply {
+                textSize = 13f
+                setPadding(dp(12), dp(10), dp(12), dp(10))
+            }
+            content.addView(linkResultView, LinearLayout.LayoutParams(mp, wc).apply { topMargin = dp(10) })
+            content.parent as View
+        }
+
+        return ScrollView(this).apply { addView(body) }
+    }
+
+    private fun updateLinksSetupCard() {
+        val hasKey = SafeBrowsingKeyStore.get(this) != null
+        linksSetupCard.visibility = if (hasKey) View.GONE else View.VISIBLE
+        linksCheckCard.visibility = if (hasKey) View.VISIBLE else View.GONE
+    }
+
+    private fun checkPastedLink() {
+        val apiKey = SafeBrowsingKeyStore.get(this) ?: return
+        val raw = linkUrlInput.text.toString()
+        if (LinkSafetyChecker.normalize(raw) == null) {
+            Toast.makeText(this, "Enter a URL first", Toast.LENGTH_SHORT).show()
+            return
+        }
+        linkResultView.text = "Checking…"
+        linkResultView.setTextColor(Color.parseColor("#6B7280"))
+        linkResultView.setBackgroundColor(Color.TRANSPARENT)
+        LinkSafetyChecker.check(apiKey, raw) { verdict -> showLinkVerdict(verdict) }
+    }
+
+    private fun showLinkVerdict(verdict: LinkSafetyChecker.Verdict) {
+        val (bg, fg, text) = when (verdict.status) {
+            LinkSafetyChecker.Status.SAFE -> Triple("#DCFCE7", "#166534", "✅ ${verdict.message}")
+            LinkSafetyChecker.Status.UNSAFE -> Triple(
+                "#FEE2E2",
+                "#991B1B",
+                "⚠️ ${verdict.message}\nThreats: ${verdict.threatTypes.joinToString(", ")}",
+            )
+            LinkSafetyChecker.Status.ERROR -> Triple("#FEF3C7", "#92400E", verdict.message)
+        }
+        linkResultView.text = text
+        linkResultView.setTextColor(Color.parseColor(fg))
+        linkResultView.background = UiKit.statusPill(this).apply { setColor(Color.parseColor(bg)) }
     }
 }

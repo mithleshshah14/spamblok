@@ -175,6 +175,48 @@ class SettingsActivity : AppCompatActivity() {
         )
         spamListCard.addView(spamListButtonRow, LinearLayout.LayoutParams(mp, wc))
 
+        val linkSafetyCard = UiKit.card(this, body)
+        UiKit.sectionTitle(this, linkSafetyCard, "Link safety check (Links tab)")
+        UiKit.sectionHint(
+            this,
+            linkSafetyCard,
+            "Optional. Checks a URL you paste against Google Safe Browsing — the only " +
+                "feature in SpamBlok that sends anything off your device (the URL itself, " +
+                "to Google, using your own free API key). Get one free at " +
+                "console.cloud.google.com → enable \"Safe Browsing API\" → Credentials → " +
+                "Create API key.",
+        )
+        val apiKeyInput = EditText(this).apply {
+            hint = "Paste your Safe Browsing API key"
+            setText(SafeBrowsingKeyStore.get(this@SettingsActivity) ?: "")
+            setPadding(dp(14), dp(10), dp(14), dp(10))
+            background = UiKit.fieldBackground(this@SettingsActivity)
+            textSize = 13f
+        }
+        linkSafetyCard.addView(apiKeyInput, LinearLayout.LayoutParams(mp, wc).apply { topMargin = dp(8) })
+        val apiKeyButtonRow = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
+        apiKeyButtonRow.addView(
+            UiKit.secondaryButton(this, "Save") {
+                val key = apiKeyInput.text.toString().trim()
+                if (key.isEmpty()) {
+                    Toast.makeText(this, "Enter a key first", Toast.LENGTH_SHORT).show()
+                } else {
+                    SafeBrowsingKeyStore.set(this, key)
+                    Toast.makeText(this, "Saved", Toast.LENGTH_SHORT).show()
+                }
+            },
+            LinearLayout.LayoutParams(0, wc, 1f).apply { marginEnd = dp(8); topMargin = dp(8) },
+        )
+        apiKeyButtonRow.addView(
+            UiKit.textButton(this, "Clear") {
+                SafeBrowsingKeyStore.clear(this)
+                apiKeyInput.setText("")
+                Toast.makeText(this, "Cleared", Toast.LENGTH_SHORT).show()
+            },
+            LinearLayout.LayoutParams(0, wc, 1f).apply { topMargin = dp(8) },
+        )
+        linkSafetyCard.addView(apiKeyButtonRow, LinearLayout.LayoutParams(mp, wc))
+
         val knownCallersCard = UiKit.card(this, body)
         UiKit.sectionTitle(this, knownCallersCard, getString(R.string.known_callers_title))
         UiKit.sectionHint(this, knownCallersCard, getString(R.string.known_callers_hint))
