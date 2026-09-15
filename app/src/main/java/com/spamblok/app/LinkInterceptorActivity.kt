@@ -3,9 +3,7 @@ package com.spamblok.app
 import android.animation.ObjectAnimator
 import android.animation.ValueAnimator
 import android.app.AlertDialog
-import android.content.ComponentName
 import android.content.Intent
-import android.content.pm.PackageManager
 import android.graphics.Color
 import android.graphics.Typeface
 import android.graphics.drawable.GradientDrawable
@@ -164,31 +162,34 @@ class LinkInterceptorActivity : AppCompatActivity() {
         }
     }
 
-    /** Opens [uri] in the user's actual browser — explicitly excluding SpamBlok
-     * itself from the candidates/chooser, since we're also registered as a handler
-     * for http/https (that's how we got this tap in the first place) and would
-     * otherwise show up as an option or, worse, loop back into this activity. */
+    /** Opens [uri] in the user's actual browser. Once SpamBlok holds the Browser
+     * role (required to get here at all), a generic ACTION_VIEW http/https query
+     * resolves to SpamBlok ONLY — Android suppresses other candidates from that
+     * query once a role holder is assigned, so excluding "self" from the results
+     * leaves nothing. Instead, look up real browsers via CATEGORY_APP_BROWSER
+     * (how launchers identify actual browser apps, independent of the current
+     * default-handler resolution) and target one explicitly with setPackage —
+     * each candidate intent is unambiguous, so SpamBlok never appears as an option
+     * and there's no risk of looping back into this activity. */
     private fun forwardToBrowser(uri: Uri) {
-        val viewIntent = Intent(Intent.ACTION_VIEW, uri)
-        val candidates = packageManager.queryIntentActivities(viewIntent, PackageManager.MATCH_DEFAULT_ONLY)
-        val others = candidates.filter { it.activityInfo.packageName != packageName }
+        val browsers = packageManager
+            .queryIntentActivities(Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_APP_BROWSER), 0)
+            .filter { it.activityInfo.packageName != packageName }
+            .distinctBy { it.activityInfo.packageName }
 
-        if (others.isEmpty()) {
-            Toast.makeText(this, "No browser found to open this link", Toast.LENGTH_SHORT).show()
+        if (browsers.isEmpty()) {
+            Toast.makeText(this, "No other browser installed to open this link", Toast.LENGTH_LONG).show()
             return
         }
 
         try {
-            if (others.size == 1) {
-                viewIntent.setClassName(others[0].activityInfo.packageName, others[0].activityInfo.name)
-                startActivity(viewIntent)
+            if (browsers.size == 1) {
+                startActivity(Intent(Intent.ACTION_VIEW, uri).setPackage(browsers[0].activityInfo.packageName))
             } else {
-                val chooser = Intent.createChooser(viewIntent, null)
-                val excluded = candidates
-                    .filter { it.activityInfo.packageName == packageName }
-                    .map { ComponentName(it.activityInfo.packageName, it.activityInfo.name) }
-                    .toTypedArray()
-                if (excluded.isNotEmpty()) chooser.putExtra(Intent.EXTRA_EXCLUDE_COMPONENTS, excluded)
+                val targeted = browsers.map { info -> Intent(Intent.ACTION_VIEW, uri).setPackage(info.activityInfo.packageName) }
+                val chooser = Intent.createChooser(targeted.first(), null).apply {
+                    putExtra(Intent.EXTRA_INITIAL_INTENTS, targeted.drop(1).toTypedArray())
+                }
                 startActivity(chooser)
             }
         } catch (e: Exception) {

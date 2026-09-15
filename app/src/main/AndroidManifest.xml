@@ -13,6 +13,18 @@
          Safe Browsing. Every other feature in this app stays fully offline. -->
     <uses-permission android:name="android.permission.INTERNET" />
 
+    <!-- Package-visibility declaration (required since Android 11): lets
+         LinkInterceptorActivity actually see other installed browser apps via
+         PackageManager.queryIntentActivities() to forward a checked link to one.
+         Without this, that query silently returns nothing once SpamBlok itself
+         holds the Browser role, even though the browsers are installed. -->
+    <queries>
+        <intent>
+            <action android:name="android.intent.action.MAIN" />
+            <category android:name="android.intent.category.APP_BROWSER" />
+        </intent>
+    </queries>
+
     <application
         android:allowBackup="true"
         android:icon="@mipmap/ic_launcher"
