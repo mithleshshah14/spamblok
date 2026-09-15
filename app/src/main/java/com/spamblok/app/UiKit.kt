@@ -103,6 +103,38 @@ object UiKit {
         setOnClickListener { onClick() }
     }
 
+    /** A filter chip/tab, e.g. the Messages tab's category row. Selected uses a
+     * filled blue pill; unselected is a flat outline. */
+    fun chip(context: Context, text: String, selected: Boolean, onClick: () -> Unit): TextView = TextView(context).apply {
+        this.text = text
+        textSize = 13f
+        setPadding(dp(context, 14), dp(context, 8), dp(context, 14), dp(context, 8))
+        setTextColor(if (selected) Color.WHITE else Color.parseColor("#374151"))
+        background = GradientDrawable().apply {
+            cornerRadius = dp(context, 16).toFloat()
+            if (selected) {
+                setColor(Color.parseColor("#0066FF"))
+            } else {
+                setColor(Color.parseColor("#F5F7FA"))
+                setStroke(dp(context, 1), Color.parseColor("#E5E7EB"))
+            }
+        }
+        isClickable = true
+        setOnClickListener { onClick() }
+    }
+
+    /** A circular icon avatar with a fixed background color and glyph (e.g. an emoji)
+     * rather than a name initial — for non-personal senders (bank/org/spam). */
+    fun iconAvatar(context: Context, sizeDp: Int, glyph: String, colorHex: String): TextView = TextView(context).apply {
+        text = glyph
+        textSize = 16f
+        gravity = android.view.Gravity.CENTER
+        background = GradientDrawable().apply {
+            shape = GradientDrawable.OVAL
+            setColor(Color.parseColor(colorHex))
+        }
+    }
+
     /** A circular "initial" avatar, e.g. for a call-log/contact row. */
     fun avatar(context: Context, sizeDp: Int, text: String): TextView = TextView(context).apply {
         this.text = text

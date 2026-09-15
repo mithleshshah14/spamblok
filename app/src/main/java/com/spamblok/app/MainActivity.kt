@@ -43,10 +43,12 @@ class MainActivity : AppCompatActivity() {
     private lateinit var recentsRow: LinearLayout
     private lateinit var callsListContainer: LinearLayout
     private lateinit var messagesPermissionCard: View
+    private lateinit var messagesCategoryRow: LinearLayout
     private lateinit var messagesListContainer: LinearLayout
 
     private var callLogEntries: List<CallLogRepository.Entry> = emptyList()
     private var callSearchFilter: String = ""
+    private var messageCategoryFilter: MessageClassifier.Category? = null // null = All
 
     // Bundled together: call history needs READ_CALL_LOG, and resolving names
     // for it live (rather than the call log's own stale CACHED_NAME snapshot)
@@ -531,10 +533,42 @@ class MainActivity : AppCompatActivity() {
             )
             content.parent as View
         }
+
+        messagesCategoryRow = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
+        body.addView(
+            HorizontalScrollView(this).apply {
+                isHorizontalScrollBarEnabled = false
+                addView(messagesCategoryRow)
+            },
+            LinearLayout.LayoutParams(mp, wc).apply { topMargin = dp(10) },
+        )
+        renderMessagesCategoryRow()
+
         messagesListContainer = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
         body.addView(messagesListContainer, LinearLayout.LayoutParams(mp, wc).apply { topMargin = dp(8) })
 
         return ScrollView(this).apply { addView(body) }
+    }
+
+    private fun renderMessagesCategoryRow() {
+        messagesCategoryRow.removeAllViews()
+        val options = listOf(
+            null to "All",
+            MessageClassifier.Category.PERSONAL to "Personal",
+            MessageClassifier.Category.BANK to "Bank",
+            MessageClassifier.Category.ORGANIZATION to "Other",
+            MessageClassifier.Category.SPAM to "Spam",
+        )
+        options.forEach { (category, label) ->
+            messagesCategoryRow.addView(
+                UiKit.chip(this, label, selected = messageCategoryFilter == category) {
+                    messageCategoryFilter = category
+                    renderMessagesCategoryRow()
+                    reloadMessages()
+                },
+                LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { marginEnd = dp(8) },
+            )
+        }
     }
 
     private fun updateMessagesPermissionCard() {
@@ -543,26 +577,51 @@ class MainActivity : AppCompatActivity() {
         messagesListContainer.visibility = if (granted) View.VISIBLE else View.GONE
     }
 
+    /** Category -> (icon glyph, icon background, "Other"/"Bank"/"Spam" footer tag).
+     * Personal senders use a name-initial avatar instead (see [reloadMessages]). */
+    private fun categoryIconFor(category: MessageClassifier.Category): Pair<String, String> = when (category) {
+        MessageClassifier.Category.BANK -> "🏦" to "#059669"
+        MessageClassifier.Category.ORGANIZATION -> "🏢" to "#0891B2"
+        MessageClassifier.Category.SPAM -> "⚠️" to "#DC2626"
+        MessageClassifier.Category.PERSONAL -> "" to "#0066FF" // unused — PERSONAL uses UiKit.avatar
+    }
+
     private fun reloadMessages() {
         messagesListContainer.removeAllViews()
-        val entries = SmsRepository.getRecent(this)
+        val allEntries = SmsRepository.getRecent(this)
+        val classified = allEntries.map { e ->
+            e to MessageClassifier.classify(e.address, e.body, SpamNumberListStore.contains(this, e.address))
+        }
+        val filter = messageCategoryFilter
+        val entries = if (filter == null) classified else classified.filter { it.second == filter }
         if (entries.isEmpty()) {
-            messagesListContainer.addView(UiKit.emptyStateText(this, "No messages yet."))
+            messagesListContainer.addView(UiKit.emptyStateText(this, if (allEntries.isEmpty()) "No messages yet." else "No messages in this category."))
             return
         }
         val fmt = java.text.SimpleDateFormat("MMM d, HH:mm", java.util.Locale.US)
-        entries.forEach { e ->
+        entries.forEach { (e, category) ->
             val row = LinearLayout(this).apply {
-                orientation = LinearLayout.VERTICAL
+                orientation = LinearLayout.HORIZONTAL
                 setPadding(0, dp(10), 0, dp(10))
             }
+            val senderLabel = if (e.type == SmsRepository.MessageType.SENT) "To ${e.address}" else e.address.ifBlank { "Unknown" }
+            val avatarSize = dp(36)
+            val avatar = if (category == MessageClassifier.Category.PERSONAL) {
+                UiKit.avatar(this, avatarSize, UiKit.initialFor(senderLabel))
+            } else {
+                val (glyph, color) = categoryIconFor(category)
+                UiKit.iconAvatar(this, avatarSize, glyph, color)
+            }
+            row.addView(avatar, LinearLayout.LayoutParams(avatarSize, avatarSize).apply { marginEnd = dp(10) })
+
+            val textColumn = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
             val topRow = LinearLayout(this).apply {
                 orientation = LinearLayout.HORIZONTAL
                 gravity = Gravity.CENTER_VERTICAL
             }
             topRow.addView(
                 TextView(this).apply {
-                    text = if (e.type == SmsRepository.MessageType.SENT) "To ${e.address}" else e.address.ifBlank { "Unknown" }
+                    text = senderLabel
                     setTextColor(Color.parseColor("#1A1A2E"))
                     textSize = 14f
                     typeface = Typeface.DEFAULT_BOLD
@@ -576,8 +635,8 @@ class MainActivity : AppCompatActivity() {
                     textSize = 11f
                 },
             )
-            row.addView(topRow)
-            row.addView(
+            textColumn.addView(topRow)
+            textColumn.addView(
                 TextView(this).apply {
                     text = e.body
                     setTextColor(Color.parseColor("#374151"))
@@ -585,6 +644,7 @@ class MainActivity : AppCompatActivity() {
                     maxLines = 2
                 },
             )
+            row.addView(textColumn, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
             messagesListContainer.addView(row)
         }
     }
