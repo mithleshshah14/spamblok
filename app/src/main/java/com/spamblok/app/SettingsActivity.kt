@@ -11,6 +11,7 @@ import android.os.Build
 import android.os.Bundle
 import android.provider.Settings
 import android.view.Gravity
+import android.view.View
 import android.view.ViewGroup
 import android.widget.EditText
 import android.widget.LinearLayout
@@ -186,16 +187,54 @@ class SettingsActivity : AppCompatActivity() {
                 "console.cloud.google.com → enable \"Safe Browsing API\" → Credentials → " +
                 "Create API key.",
         )
+        // Saved state: the key itself is never shown again once set — just a status
+        // line and Edit/Delete. Editing state: the input field, shown only while
+        // there's no key saved yet or the user tapped Edit.
+        val linkSavedStatus = TextView(this).apply {
+            text = "API key saved (••••••••)"
+            setTextColor(Color.parseColor("#166534"))
+            textSize = 13f
+            typeface = Typeface.DEFAULT_BOLD
+        }
+        val linkSavedRow = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+        linkSavedRow.addView(linkSavedStatus, LinearLayout.LayoutParams(mp, wc).apply { topMargin = dp(8) })
+        val linkSavedButtonRow = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
+        linkSavedRow.addView(linkSavedButtonRow, LinearLayout.LayoutParams(mp, wc).apply { topMargin = dp(6) })
+
         val apiKeyInput = EditText(this).apply {
             hint = "Paste your Safe Browsing API key"
-            setText(SafeBrowsingKeyStore.get(this@SettingsActivity) ?: "")
             setPadding(dp(14), dp(10), dp(14), dp(10))
             background = UiKit.fieldBackground(this@SettingsActivity)
             textSize = 13f
         }
-        linkSafetyCard.addView(apiKeyInput, LinearLayout.LayoutParams(mp, wc).apply { topMargin = dp(8) })
-        val apiKeyButtonRow = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
-        apiKeyButtonRow.addView(
+        val linkEditRow = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+        linkEditRow.addView(apiKeyInput, LinearLayout.LayoutParams(mp, wc).apply { topMargin = dp(8) })
+        val linkEditButtonRow = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
+        linkEditRow.addView(linkEditButtonRow, LinearLayout.LayoutParams(mp, wc).apply { topMargin = dp(6) })
+
+        fun refreshLinkSafetyCard() {
+            val hasKey = SafeBrowsingKeyStore.get(this) != null
+            linkSavedRow.visibility = if (hasKey) View.VISIBLE else View.GONE
+            linkEditRow.visibility = if (hasKey) View.GONE else View.VISIBLE
+            apiKeyInput.setText("")
+        }
+
+        linkSavedButtonRow.addView(
+            UiKit.secondaryButton(this, "Edit") {
+                linkSavedRow.visibility = View.GONE
+                linkEditRow.visibility = View.VISIBLE
+            },
+            LinearLayout.LayoutParams(0, wc, 1f).apply { marginEnd = dp(8) },
+        )
+        linkSavedButtonRow.addView(
+            UiKit.textButton(this, "Delete") {
+                SafeBrowsingKeyStore.clear(this)
+                Toast.makeText(this, "Deleted", Toast.LENGTH_SHORT).show()
+                refreshLinkSafetyCard()
+            },
+            LinearLayout.LayoutParams(0, wc, 1f),
+        )
+        linkEditButtonRow.addView(
             UiKit.secondaryButton(this, "Save") {
                 val key = apiKeyInput.text.toString().trim()
                 if (key.isEmpty()) {
@@ -203,19 +242,19 @@ class SettingsActivity : AppCompatActivity() {
                 } else {
                     SafeBrowsingKeyStore.set(this, key)
                     Toast.makeText(this, "Saved", Toast.LENGTH_SHORT).show()
+                    refreshLinkSafetyCard()
                 }
             },
-            LinearLayout.LayoutParams(0, wc, 1f).apply { marginEnd = dp(8); topMargin = dp(8) },
+            LinearLayout.LayoutParams(0, wc, 1f).apply { marginEnd = dp(8) },
         )
-        apiKeyButtonRow.addView(
-            UiKit.textButton(this, "Clear") {
-                SafeBrowsingKeyStore.clear(this)
-                apiKeyInput.setText("")
-                Toast.makeText(this, "Cleared", Toast.LENGTH_SHORT).show()
-            },
-            LinearLayout.LayoutParams(0, wc, 1f).apply { topMargin = dp(8) },
+        linkEditButtonRow.addView(
+            UiKit.textButton(this, "Cancel") { refreshLinkSafetyCard() },
+            LinearLayout.LayoutParams(0, wc, 1f),
         )
-        linkSafetyCard.addView(apiKeyButtonRow, LinearLayout.LayoutParams(mp, wc))
+
+        linkSafetyCard.addView(linkSavedRow)
+        linkSafetyCard.addView(linkEditRow)
+        refreshLinkSafetyCard()
 
         val knownCallersCard = UiKit.card(this, body)
         UiKit.sectionTitle(this, knownCallersCard, getString(R.string.known_callers_title))
