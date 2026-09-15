@@ -555,6 +555,7 @@ class MainActivity : AppCompatActivity() {
         val options = listOf(
             null to "All",
             MessageClassifier.Category.PERSONAL to "Personal",
+            MessageClassifier.Category.OTP to "OTP",
             MessageClassifier.Category.BANK to "Bank",
             MessageClassifier.Category.ORGANIZATION to "Other",
             MessageClassifier.Category.SPAM to "Spam",
@@ -577,9 +578,39 @@ class MainActivity : AppCompatActivity() {
         messagesListContainer.visibility = if (granted) View.VISIBLE else View.GONE
     }
 
+    /** Tapping a message row: the list truncates the body to 2 lines, so this shows
+     * the full text (selectable — handy for copying an OTP) plus a Copy button. */
+    private fun showMessageDetail(sender: String, body: String, timestamp: String) {
+        val bodyView = TextView(this).apply {
+            text = body
+            setTextIsSelectable(true)
+            setTextColor(Color.parseColor("#1A1A2E"))
+            textSize = 14f
+            setPadding(dp(4), dp(4), dp(4), dp(4))
+        }
+        AlertDialog.Builder(this)
+            .setTitle(sender)
+            .setMessage(timestamp)
+            .setView(
+                LinearLayout(this).apply {
+                    orientation = LinearLayout.VERTICAL
+                    setPadding(dp(20), dp(4), dp(20), dp(4))
+                    addView(bodyView)
+                },
+            )
+            .setPositiveButton("Copy") { _, _ ->
+                val clipboard = getSystemService(CLIPBOARD_SERVICE) as android.content.ClipboardManager
+                clipboard.setPrimaryClip(android.content.ClipData.newPlainText("Message", body))
+                Toast.makeText(this, "Copied", Toast.LENGTH_SHORT).show()
+            }
+            .setNegativeButton("Close", null)
+            .show()
+    }
+
     /** Category -> (icon glyph, icon background, "Other"/"Bank"/"Spam" footer tag).
      * Personal senders use a name-initial avatar instead (see [reloadMessages]). */
     private fun categoryIconFor(category: MessageClassifier.Category): Pair<String, String> = when (category) {
+        MessageClassifier.Category.OTP -> "🔐" to "#7C3AED"
         MessageClassifier.Category.BANK -> "🏦" to "#059669"
         MessageClassifier.Category.ORGANIZATION -> "🏢" to "#0891B2"
         MessageClassifier.Category.SPAM -> "⚠️" to "#DC2626"
@@ -600,11 +631,13 @@ class MainActivity : AppCompatActivity() {
         }
         val fmt = java.text.SimpleDateFormat("MMM d, HH:mm", java.util.Locale.US)
         entries.forEach { (e, category) ->
+            val senderLabel = if (e.type == SmsRepository.MessageType.SENT) "To ${e.address}" else e.address.ifBlank { "Unknown" }
             val row = LinearLayout(this).apply {
                 orientation = LinearLayout.HORIZONTAL
                 setPadding(0, dp(10), 0, dp(10))
+                isClickable = true
+                setOnClickListener { showMessageDetail(senderLabel, e.body, fmt.format(java.util.Date(e.timestampMillis))) }
             }
-            val senderLabel = if (e.type == SmsRepository.MessageType.SENT) "To ${e.address}" else e.address.ifBlank { "Unknown" }
             val avatarSize = dp(36)
             val avatar = if (category == MessageClassifier.Category.PERSONAL) {
                 UiKit.avatar(this, avatarSize, UiKit.initialFor(senderLabel))

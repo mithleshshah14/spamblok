@@ -13,7 +13,12 @@ package com.spamblok.app
  */
 object MessageClassifier {
 
-    enum class Category { PERSONAL, BANK, ORGANIZATION, SPAM }
+    enum class Category { PERSONAL, OTP, BANK, ORGANIZATION, SPAM }
+
+    private val OTP_KEYWORDS = listOf(
+        "otp", "one time password", "one-time password", "verification code",
+        "security code", "verification pin",
+    )
 
     private val BANK_KEYWORDS = listOf(
         "hdfc", "icici", "sbi", "axis", "kotak", "pnb", "bob", "canara", "yesbank",
@@ -49,15 +54,17 @@ object MessageClassifier {
         if (isKnownSpamNumber) return Category.SPAM
 
         val haystack = "$address $body".lowercase()
-        val looksLikeSpam = SPAM_KEYWORDS.any { haystack.contains(it) }
-        val looksLikeBank = BANK_KEYWORDS.any { haystack.contains(it) }
-
-        // A bank/OTP message ("your OTP is...", "a/c debited...") often also trips a
-        // generic promo keyword (e.g. an offer inside a bank SMS) — bank wins, since
-        // that's the more specific, higher-value signal and false-flagging a real
-        // bank message as spam is the worse mistake to make.
-        if (looksLikeBank) return Category.BANK
-        if (looksLikeSpam) return Category.SPAM
+        // Spam keywords are checked first, ahead of OTP/bank: a message forging OTP
+        // or bank language to look trustworthy ("your OTP prize is ready, click
+        // here...") is exactly the kind of thing that needs to keep landing in Spam,
+        // not get waved through because it also mentions "OTP".
+        if (SPAM_KEYWORDS.any { haystack.contains(it) }) return Category.SPAM
+        // OTP ahead of Bank: a bank's own OTP text ("SECRET OTP for txn...ICICI
+        // Bank...") mentions both, but the whole point of a dedicated OTP tab is
+        // finding any OTP fast regardless of who sent it — it shouldn't be split
+        // across Bank vs OTP depending on the sender.
+        if (OTP_KEYWORDS.any { haystack.contains(it) }) return Category.OTP
+        if (BANK_KEYWORDS.any { haystack.contains(it) }) return Category.BANK
 
         return if (looksLikePhoneNumber(address)) Category.PERSONAL else Category.ORGANIZATION
     }
