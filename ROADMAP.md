@@ -375,3 +375,108 @@ reconciliation. Just read + log (+ a basic on-device viewer added for convenienc
     — user-requested, so a call-log row can be looked up without retyping
     the number into search.
   - Verified end-to-end on-device against both numbers the user reported.
+- **2026-09-15: Messages tab categorized (Personal/OTP/Bank/Other/Spam), tappable
+  to read full text + Reply, and a new "Links" tab for URL safety checks.**
+  - New offline `MessageClassifier.kt` (same no-network philosophy as
+    `NumberHeuristics`): a dedicated **OTP** category (checked ahead of Bank —
+    a bank's own OTP text mentions both, but the point of the tab is finding
+    any OTP fast regardless of sender) but behind spam-keyword matching (so
+    fake-OTP phishing still lands in Spam). **Personal** requires an actual
+    mobile-number-shaped address (10, or 12/13 digits with country code) —
+    a short numeric code (5-9 digits, common for Indian OTP/alert senders)
+    is never treated as a person just for being all-digit. Messages tab gets
+    a filter-chip row (`UiKit.chip`) and a category icon per row
+    (`UiKit.iconAvatar` — bank/building/warning glyph; Personal still uses
+    the name-initial avatar).
+  - Message rows had no tap handler at all and truncated to 2 lines with no
+    way to read the rest. Tapping now shows the full text (selectable) with
+    **Reply** (hands off to the default SMS app via `ACTION_SENDTO`/`smsto:`,
+    same pattern as Calls' "Call" handing off to the dialer — SpamBlok stays
+    read-only, no `SEND_SMS` permission) and **Copy** buttons.
+  - Real SMS auto-delete/expiry (user's original OTP-cleanup ask) was ruled
+    out — only the default SMS app can delete from the system inbox on
+    Android, out of scope; user chose to skip it and just get the OTP tab.
+  - New third bottom-nav tab **Links**: paste a URL, check it against
+    **Google Safe Browsing** (`LinkSafetyChecker.kt`, plain
+    `HttpURLConnection` + `org.json`, no new dependencies) using the user's
+    own free API key (`SafeBrowsingKeyStore.kt`, entered in Settings — the
+    *only* feature in SpamBlok that sends anything off-device; explicitly
+    chosen over offline-only heuristics after discussing the trade-off with
+    the user). Needs `INTERNET` permission, added and scoped in the
+    manifest comment to just this feature.
+    - Google API key gotcha: an "Android apps"-restricted key needs the
+      `X-Android-Package` / `X-Android-Cert` (SHA-1, no colons) headers set
+      manually on a raw REST call — Google's official SDKs add these
+      automatically but our plain `HttpURLConnection` didn't, so every
+      request was silently rejected (400/403) even with a valid key until
+      this was added.
+    - Settings' API key field now hides the key once saved (masked "API key
+      saved (••••••••)" + Edit/Delete) instead of always showing it in
+      plain text.
+  - Verified end-to-end on-device: Google's official Safe Browsing test URL
+    (`testsafebrowsing.appspot.com/s/malware.html`) correctly flagged.
+- **2026-09-15/16: System-wide link protection (LinkInterceptorActivity) —
+  built, debugged through several real Android platform gotchas, and its
+  actual coverage limits established with hard evidence, not guesswork.**
+  Opt-in: registers for http/https `VIEW` intents; once the user holds
+  Android's Browser role (`RoleManager.ROLE_BROWSER` — Settings card now
+  requests this directly, see below), a tapped link anywhere checks via
+  `LinkSafetyChecker` first, then forwards to the real browser (safe/
+  couldn't-verify → fails open) or shows an "⚠️ Dangerous link" dialog
+  (Open anyway / Cancel) for a flagged one. Animated "Checking link
+  safety…" interstitial (pulsing shield + spinner in a card) replaced a
+  plain white placeholder screen.
+  - **Bug 1:** `launchMode="singleTask"` with no taskAffinity override
+    merged the activity into SpamBlok's own task — cancelling a link check
+    from another app would have surfaced SpamBlok's main Calls screen
+    instead of returning to that app. Fixed with `android:taskAffinity=""`.
+  - **Bug 2:** once SpamBlok actually held the Browser role, forwarding
+    broke ("No browser found") — a generic `ACTION_VIEW` http/https query
+    resolves to SpamBlok *only* once it's the assigned role holder (Android
+    suppresses other candidates from that query), so excluding "self" from
+    the results left nothing. Fixed by looking up real browsers via
+    `CATEGORY_APP_BROWSER` (how launchers identify actual browser apps,
+    independent of current default-handler resolution) and targeting each
+    explicitly with `setPackage()`.
+  - **Bug 3:** that fix alone still found zero browsers — Android 11+
+    restricts `PackageManager` visibility into other apps' components unless
+    declared via a manifest `<queries>` element. Added one for
+    `ACTION_MAIN` + `CATEGORY_APP_BROWSER`. Confirmed via
+    `adb shell cmd package query-activities` (full shell visibility, found
+    Chrome/Brave/Samsung Internet) vs. the app's own query (found nothing)
+    that this was exactly the gap.
+  - **Bug 4 (Settings UX, not the interceptor):** the "link protection"
+    Settings button linked to `ACTION_APPLICATION_DETAILS_SETTINGS` (App
+    Info), which only covers Android App Links (verified website domains) —
+    there's no generic-link "Open by default" entry there. The user found
+    the actual control under Settings → Apps → Default apps → Browser app
+    instead. Replaced the button with a direct
+    `RoleManager.createRequestRoleIntent(ROLE_BROWSER)` request, mirroring
+    the existing call-screening role request.
+  - **Established limit (hard evidence, not assumption):** WhatsApp and
+    Google Messages do **not** route through this at all. Confirmed via
+    `adb shell dumpsys window` immediately after a real link tap:
+    `mFocusedApp=com.whatsapp/.iab.IABWebCoreActivity` — WhatsApp's *own*
+    in-app browser activity, inside WhatsApp's own package. This is not
+    Chrome Custom Tabs (which would show a different app's activity) and
+    not fixable via `RoleManager` or any Intent-based mechanism — no
+    external Android Intent is ever dispatched, so no app (SpamBlok
+    included) can intercept it. (A user-pasted alternative diagnosis
+    claimed this was fixable via Custom Tabs support; checked against the
+    actual on-device evidence and it doesn't hold up for WhatsApp
+    specifically — see git log for the full back-and-forth.) The only
+    remaining path for WhatsApp/Messages links is manually pasting into the
+    Links tab; a real fix would mean accessibility-scraping WhatsApp's own
+    in-app browser and drawing a warning overlay (same fragile pattern as
+    the Truecaller-search hack, bigger scope) — user declined to build this
+    for now.
+  - Settings hint text corrected to state the WhatsApp/Messages limitation
+    directly rather than imply full coverage.
+- **2026-09-16: [UNRESOLVED — fix next session] Overlay banner shows even for
+  a call from a number already saved with a name (should only show for
+  unknown/spam-risk numbers, or should show a "known contact" variant
+  instead of the generic verdict banner).** Not yet investigated — start
+  here. Likely in `SpamBlokCallScreeningService.onScreenCall()` /
+  `OverlayForegroundService` — currently the overlay always fires
+  regardless of whether `CallerRepository.lookup()`/Contacts already
+  identifies the number as a known, presumably-legitimate contact.
