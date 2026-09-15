@@ -1,13 +1,21 @@
 package com.spamblok.app
 
+import android.animation.ObjectAnimator
+import android.animation.ValueAnimator
 import android.app.AlertDialog
 import android.content.ComponentName
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.graphics.Color
+import android.graphics.Typeface
+import android.graphics.drawable.GradientDrawable
 import android.net.Uri
 import android.os.Bundle
+import android.view.Gravity
+import android.view.ViewGroup
+import android.widget.FrameLayout
 import android.widget.LinearLayout
+import android.widget.ProgressBar
 import android.widget.TextView
 import android.widget.Toast
 import androidx.appcompat.app.AppCompatActivity
@@ -25,6 +33,8 @@ import androidx.appcompat.app.AppCompatActivity
  */
 class LinkInterceptorActivity : AppCompatActivity() {
 
+    private var pulseAnimator: ValueAnimator? = null
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
@@ -41,22 +51,94 @@ class LinkInterceptorActivity : AppCompatActivity() {
             return
         }
 
-        setContentView(
-            LinearLayout(this).apply {
-                orientation = LinearLayout.VERTICAL
-                setPadding(dp(24), dp(24), dp(24), dp(24))
-                setBackgroundColor(Color.parseColor("#F5F7FA"))
-                addView(
-                    TextView(this@LinkInterceptorActivity).apply {
-                        text = "Checking link…\n$uri"
-                        setTextColor(Color.parseColor("#374151"))
-                        textSize = 14f
-                    },
-                )
+        setContentView(buildCheckingView(uri))
+        LinkSafetyChecker.check(apiKey, uri.toString()) { verdict -> handleVerdict(uri, verdict) }
+    }
+
+    /** A centered card with a pulsing shield behind a spinner — replaces what was a
+     * plain white "Checking link…" screen with something that reads as active
+     * protection working, not a stalled/frozen app. */
+    private fun buildCheckingView(uri: Uri): LinearLayout {
+        val root = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            gravity = Gravity.CENTER
+            setPadding(dp(24), dp(24), dp(24), dp(24))
+            setBackgroundColor(Color.parseColor("#0066FF"))
+        }
+
+        val card = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            gravity = Gravity.CENTER
+            setPadding(dp(28), dp(32), dp(28), dp(32))
+            background = GradientDrawable().apply {
+                setColor(Color.WHITE)
+                cornerRadius = dp(20).toFloat()
+            }
+        }
+
+        val iconStack = FrameLayout(this)
+        val spinnerSize = dp(72)
+        val spinner = ProgressBar(this).apply {
+            indeterminateTintList = android.content.res.ColorStateList.valueOf(Color.parseColor("#0066FF"))
+        }
+        iconStack.addView(spinner, FrameLayout.LayoutParams(spinnerSize, spinnerSize))
+        val shield = TextView(this).apply {
+            text = "🛡️"
+            textSize = 26f
+            gravity = Gravity.CENTER
+        }
+        iconStack.addView(shield, FrameLayout.LayoutParams(spinnerSize, spinnerSize))
+        card.addView(iconStack, LinearLayout.LayoutParams(spinnerSize, spinnerSize))
+
+        pulseAnimator = ObjectAnimator.ofFloat(shield, "scaleX", 0.85f, 1.15f).apply {
+            duration = 700
+            repeatMode = ValueAnimator.REVERSE
+            repeatCount = ValueAnimator.INFINITE
+            start()
+        }
+        ObjectAnimator.ofFloat(shield, "scaleY", 0.85f, 1.15f).apply {
+            duration = 700
+            repeatMode = ValueAnimator.REVERSE
+            repeatCount = ValueAnimator.INFINITE
+            start()
+        }
+
+        card.addView(
+            TextView(this).apply {
+                text = "Checking link safety…"
+                setTextColor(Color.parseColor("#1A1A2E"))
+                textSize = 16f
+                typeface = Typeface.DEFAULT_BOLD
+                gravity = Gravity.CENTER
+                setPadding(0, dp(18), 0, dp(6))
+            },
+        )
+        card.addView(
+            TextView(this).apply {
+                text = uri.toString()
+                setTextColor(Color.parseColor("#6B7280"))
+                textSize = 12f
+                gravity = Gravity.CENTER
+                maxLines = 3
+            },
+        )
+        card.addView(
+            TextView(this).apply {
+                text = "Powered by Google Safe Browsing"
+                setTextColor(Color.parseColor("#9CA3AF"))
+                textSize = 10f
+                gravity = Gravity.CENTER
+                setPadding(0, dp(14), 0, 0)
             },
         )
 
-        LinkSafetyChecker.check(apiKey, uri.toString()) { verdict -> handleVerdict(uri, verdict) }
+        root.addView(card, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
+        return root
+    }
+
+    override fun onDestroy() {
+        pulseAnimator?.cancel()
+        super.onDestroy()
     }
 
     private fun handleVerdict(uri: Uri, verdict: LinkSafetyChecker.Verdict) {
