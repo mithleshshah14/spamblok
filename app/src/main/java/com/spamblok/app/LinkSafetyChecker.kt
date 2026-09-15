@@ -75,6 +75,12 @@ object LinkSafetyChecker {
         connection.requestMethod = "POST"
         connection.doOutput = true
         connection.setRequestProperty("Content-Type", "application/json")
+        // Required when the API key is restricted to "Android apps" in Google Cloud
+        // Console: that restriction is enforced via these two headers on a plain REST
+        // call, not automatically — without them Google rejects the request outright
+        // (400/403) even with an otherwise-valid key.
+        connection.setRequestProperty("X-Android-Package", "com.spamblok.app")
+        connection.setRequestProperty("X-Android-Cert", "E7C0AB4579D2409F99EAFBA620CC6E84982CF269")
         connection.connectTimeout = 10_000
         connection.readTimeout = 10_000
         try {
@@ -85,11 +91,13 @@ object LinkSafetyChecker {
             val responseText = stream?.bufferedReader()?.use { it.readText() }.orEmpty()
 
             if (responseCode !in 200..299) {
-                return if (responseCode == 400 || responseCode == 403) {
-                    Verdict(Status.ERROR, emptyList(), "API key rejected — check it's a valid Safe Browsing key in Settings.")
-                } else {
-                    Verdict(Status.ERROR, emptyList(), "Safe Browsing returned an error (HTTP $responseCode).")
+                val detail = try {
+                    JSONObject(responseText.ifBlank { "{}" }).optJSONObject("error")?.optString("message")
+                } catch (e: Exception) {
+                    null
                 }
+                val prefix = if (responseCode == 400 || responseCode == 403) "API key rejected" else "Safe Browsing error (HTTP $responseCode)"
+                return Verdict(Status.ERROR, emptyList(), if (detail.isNullOrBlank()) "$prefix." else "$prefix: $detail")
             }
 
             val matches = JSONObject(responseText.ifBlank { "{}" }).optJSONArray("matches")
