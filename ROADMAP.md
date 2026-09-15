@@ -332,3 +332,46 @@ reconciliation. Just read + log (+ a basic on-device viewer added for convenienc
      "Search Truecaller" button stops returning results, re-run
      `uiautomator dump` after firing the same test intent to check whether
      the resource ids changed.
+- **2026-09-15: [BUG, found post-release via user report] Live-call overlay
+  showed carrier spam-warning text ("Suspected Spam", "SPAM Alert from Jio")
+  instead of the real name Truecaller itself displays for the same number
+  (confirmed by the user checking Truecaller directly — "naukri.com" and
+  "swiggy instamart" for two real calls).** Diagnosed using a new temporary
+  "Debug: view captured caller log" button in Settings (there was no
+  on-device viewer for `CallLogStore`'s existing capture log) — inspecting
+  real captured events from the user's actual calls showed
+  `com.samsung.android.incallui:id/name = "Suspected Spam"`. Root cause, two
+  layers:
+  1. Samsung's stock incallui reuses the *same* `id/name` accessibility field
+     for three different things: a real caller name, its own carrier-sourced
+     spam warning, or (when it has no identification at all) the bare phone
+     number echoed back as a fallback. `BannerReaderService` treated all
+     three as a real name — capturing, displaying, and persisting whichever
+     one showed up.
+  2. Once a bad "name" (spam label or bare number) got stored,
+     `CallerRepository`'s existing mismatch-protection (intentionally keeps
+     the first-seen name and only flags disagreement — see `isMismatch()`)
+     then permanently blocked the *correct* name from ever overriding it,
+     even one fetched later via "Search Truecaller".
+  Fixed with new `SpamLabelHeuristics.looksLikeSpamWarning()` /
+  `looksLikeBareNumber()`, used in three places: `BannerReaderService`
+  (don't capture either as a name — spam-label text still surfaces live as
+  a *label*, just never persisted), `MainActivity.resolveCaller()` (don't
+  trust the call log's own `CACHED_NAME` column when it's either — the
+  system writes the same bad values there too, independent of our own
+  capture), and new `CallerRepository.purgeSpamLikeNames()` (one-time
+  cleanup for already-polluted rows — clears the name and resets the
+  mismatch count, run once from `MainActivity.onCreate`, no-op once clean).
+  - While diagnosing, also found and fixed a related bug in the "Search
+    Truecaller" flow (separate from the incallui issue above): Truecaller's
+    own dialer screen briefly shows the searched number itself as a
+    placeholder `id/title` before its network lookup resolves the real name
+    — `TruecallerSearchBridge.deliver()` was accepting that placeholder as
+    the final result and consuming the one-shot bridge before the real name
+    ever arrived. Now it ignores an echoed-back number and keeps the bridge
+    armed (timeout bumped 4s → 6s to give the real lookup more room).
+  - Also added "Search Truecaller" directly to the existing per-row tap menu
+    (Call / Add-name / Edit-name), not just the search-bar's not-found card
+    — user-requested, so a call-log row can be looked up without retyping
+    the number into search.
+  - Verified end-to-end on-device against both numbers the user reported.
