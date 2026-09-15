@@ -273,36 +273,23 @@ reconciliation. Just read + log (+ a basic on-device viewer added for convenienc
   - Added the ability to add/edit a name for a number directly from the Calls
     tab (`CallerRepository.setManualName()`), since system Contacts isn't
     always populated for every caller.
-- **2026-09-15: [UNRESOLVED — carrying into next session] Caller-name
-  priority still wrong: a number saved to system Contacts after a call still
-  shows our own DB's name instead of the live Contacts name.** Root cause
-  identified: `CallLog.Calls.CACHED_NAME` (what call-log rows carry) is a
-  snapshot taken at call time, so it doesn't reflect a contact added
-  afterward. First attempted fix (this session): added `ContactsRepository.kt`
-  (live `ContactsContract.PhoneLookup.CONTENT_FILTER_URI` query), added
-  `READ_CONTACTS` permission, changed the Calls-tab permission request to ask
-  for `READ_CALL_LOG` + `READ_CONTACTS` together, and reordered
-  `MainActivity.resolveCaller()` to prefer a live Contacts lookup over the
-  cached call-log name before falling back to our own DB. Built, installed,
-  user re-tested — **still shows the DB name, not the Contacts name.** Not
-  yet debugged further (session ended here). Suspects to check next session,
-  in order:
-  1. Whether `READ_CONTACTS` was actually granted on-device — the "Grant
-     access" button now requests both permissions together, but if the user
-     had already dismissed/denied it before this change landed, the app may
-     still be running without it (`hasPermission()` gate in `resolveCaller()`
-     would silently skip the live lookup and fall through to the DB name).
-     Check via `adb shell dumpsys package com.spamblok.app | grep -A2
-     READ_CONTACTS`.
-  2. Whether `ContactsRepository.lookupName()` is actually being reached —
-     add a temporary log line, or check that `resolveCaller()`'s call site in
-     the row-rendering code passes the right raw number format (E.164 vs.
-     local) — `PhoneLookup.CONTENT_FILTER_URI` can be sensitive to number
-     formatting/normalization mismatches on some OEMs.
-  3. Whether the emulator/device's Contacts entry was actually saved for the
-     *same* number string being looked up (e.g. saved with a different
-     country-code prefix than what the call log recorded).
-  4. Double check `resolveCaller()`'s priority chain is actually being hit
-     for the row in question — confirm the render path calls the updated
-     `resolveCaller()` and not some other stale name-resolution code path
-     left over from before this session's refactor.
+- **2026-09-15: [RESOLVED] Caller-name priority bug fixed** — a number saved
+  to system Contacts after a call was still showing our own DB's name instead
+  of the live Contacts name. Root cause (confirmed via suspect #1 from this
+  same day's earlier entry): `READ_CONTACTS` was never actually granted on
+  this device. `MainActivity.updateCallsPermissionCard()` only checked
+  `READ_CALL_LOG` before showing the "Grant access" card — since the user had
+  already granted `READ_CALL_LOG` before `READ_CONTACTS` was added to the
+  same button, the card never reappeared and the user was never asked for
+  Contacts access, so `resolveCaller()`'s `hasPermission()` gate silently
+  skipped the live lookup every time. `ContactsRepository.lookupName()` and
+  `resolveCaller()`'s priority order were both already correct — no bug there.
+  Fix: `updateCallsPermissionCard()` now keeps the card visible (with
+  Contacts-specific copy) until *both* permissions are granted, not just
+  `READ_CALL_LOG`. Verified on-device: card reappeared, user granted
+  `READ_CONTACTS`, Calls tab now shows the live Contacts name.
+  - Installed via **release** build (`./gradlew assembleRelease` +
+    `adb install -r app-release.apk`), not debug — this device had a
+    release-signed APK installed already, so `assembleDebug` failed to
+    install with `INSTALL_FAILED_UPDATE_INCOMPATIBLE` (signature mismatch).
+    This project installs release builds on-device, not debug.
