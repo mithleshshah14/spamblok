@@ -256,6 +256,25 @@ class SettingsActivity : AppCompatActivity() {
         linkSafetyCard.addView(linkEditRow)
         refreshLinkSafetyCard()
 
+        val linkProtectionCard = UiKit.card(this, body)
+        UiKit.sectionTitle(this, linkProtectionCard, "Link protection (system-wide)")
+        UiKit.sectionHint(
+            this,
+            linkProtectionCard,
+            "Optional. Once turned on in Android's own settings, tapping ANY link " +
+                "anywhere on your phone — WhatsApp, Messages, any app — checks it here " +
+                "first, then opens your browser if it's safe. Uses the same API key above.",
+        )
+        linkProtectionCard.addView(
+            UiKit.secondaryButton(this, "Open Android's link settings") {
+                startActivity(
+                    Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.parse("package:$packageName")),
+                )
+                Toast.makeText(this, "Look for \"Open by default\" or \"Set as default\" → add SpamBlok for links", Toast.LENGTH_LONG).show()
+            },
+            LinearLayout.LayoutParams(mp, wc).apply { topMargin = dp(10) },
+        )
+
         val knownCallersCard = UiKit.card(this, body)
         UiKit.sectionTitle(this, knownCallersCard, getString(R.string.known_callers_title))
         UiKit.sectionHint(this, knownCallersCard, getString(R.string.known_callers_hint))
