@@ -331,16 +331,68 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
+    /** A search term that's a phone number rather than a name search — enough
+     * digits that a direct lookup (rather than call-log filtering) makes sense,
+     * even for a number that's never been called before. */
+    private fun looksLikeNumberSearch(raw: String): Boolean {
+        val digits = raw.count { it.isDigit() }
+        val nonDialChars = raw.count { !it.isDigit() && it !in "+ -()" }
+        return digits >= 4 && nonDialChars == 0
+    }
+
     private fun renderCallLog() {
         callsListContainer.removeAllViews()
-        val filter = callSearchFilter.trim().lowercase()
+        val rawFilter = callSearchFilter.trim()
+        val filter = rawFilter.lowercase()
+
+        if (looksLikeNumberSearch(rawFilter)) {
+            val resolved = resolveCaller(rawFilter, null)
+            val hasCallHistory = callLogEntries.any { CallerRepository.normalize(it.number) == CallerRepository.normalize(rawFilter) }
+            // Only worth a dedicated card when we actually resolved to a real
+            // name (not just echoing the number back) or there's no matching
+            // call-log row for it to appear alongside below.
+            if (resolved.displayName != rawFilter || !hasCallHistory) {
+                val content = UiKit.card(this, callsListContainer)
+                val row = LinearLayout(this).apply {
+                    orientation = LinearLayout.HORIZONTAL
+                    gravity = Gravity.CENTER_VERTICAL
+                    isClickable = true
+                    setOnClickListener { showCallOptions(rawFilter, resolved) }
+                }
+                row.addView(UiKit.avatar(this, dp(40), UiKit.initialFor(resolved.displayName)), LinearLayout.LayoutParams(dp(40), dp(40)).apply { marginEnd = dp(12) })
+                val textColumn = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+                textColumn.addView(
+                    TextView(this).apply {
+                        text = resolved.displayName
+                        setTextColor(Color.parseColor("#1A1A2E"))
+                        textSize = 15f
+                    },
+                )
+                textColumn.addView(
+                    TextView(this).apply {
+                        text = if (resolved.displayName != rawFilter) {
+                            "$rawFilter · ${if (resolved.isSystemContact) "From Contacts" else "From our DB"}"
+                        } else {
+                            "Not found — tap to call or add a name"
+                        }
+                        setTextColor(Color.parseColor("#6B7280"))
+                        textSize = 12f
+                    },
+                )
+                row.addView(textColumn, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
+                content.addView(row)
+            }
+        }
+
         val entries = callLogEntries.filter { e ->
             if (filter.isEmpty()) return@filter true
             val resolved = resolveCaller(e.number, e.displayName)
             resolved.displayName.lowercase().contains(filter) || e.number.lowercase().contains(filter)
         }
         if (entries.isEmpty()) {
-            callsListContainer.addView(UiKit.emptyStateText(this, if (callSearchFilter.isEmpty()) "No calls yet." else "No matches."))
+            if (!looksLikeNumberSearch(rawFilter)) {
+                callsListContainer.addView(UiKit.emptyStateText(this, if (callSearchFilter.isEmpty()) "No calls yet." else "No matches."))
+            }
             return
         }
         val fmt = java.text.SimpleDateFormat("MMM d, HH:mm", java.util.Locale.US)
